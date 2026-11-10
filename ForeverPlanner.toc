@@ -3,7 +3,7 @@
 ## Notes: Planejador de quests por zona para leveling no WoW: Forever (guia por hub, XP/hora com XP de mob), com GPS, macros e builds.
 ## Notes-ptBR: Planejador de quests por zona para leveling no WoW: Forever (guia por hub, XP/hora com XP de mob), com GPS, macros e builds.
 ## Author: Calcifer Fallingstar
-## Version: 0.7.1
+## Version: 0.8.0
 ## Category: Quests
 ## Dependencies: QuestieDB
 ## OptionalDeps: TomTom
@@ -18,6 +18,7 @@ Core.lua
 Weights.lua
 Milestones.lua
 Leveling.lua
+Zones.lua
 Scoring.lua
 Data.lua
 Planner.lua
@@ -32,6 +33,7 @@ Content\Classes.lua
 Content\Spells.lua
 Content\Transports.lua
 Content\QuestFixes.lua
+Content\Zones.lua
 UI\Theme.lua
 UI\MainFrame.lua
 UI\GuideTab.lua

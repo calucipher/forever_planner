@@ -80,15 +80,12 @@ local function build()
     f.status:SetWidth(W - 150)
     -- Spec 014: desfaz as marcas de quest que o jogo não ofereceu.
     local reset = Theme.Button(f, "Reativar quests", 110, 18, function()
-        local n = 0
-        for _ in pairs(ns.FP.db.unavailable or {}) do n = n + 1 end
-        ns.Planner.ClearUnavailable()
-        ns.FP.Print(n .. " quest(s) que o jogo não oferecia voltaram ao plano.")
+        ns.Planner.ConfirmClearUnavailable("painel")
     end)
     reset:SetPoint("BOTTOMRIGHT", -10, 6)
     reset:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Desfaz as marcas de quest indisponível (o addon marca sozinho quando o NPC não oferece a quest)", 1, 1, 1, true)
+        GameTooltip:AddLine("Desfaz as marcas de quest indisponível (pede confirmação). Não serve para atualizar: para isso, 'Recalcular rota' no menu '+'.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     reset:HookScript("OnLeave", function() GameTooltip:Hide() end)

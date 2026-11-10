@@ -10,7 +10,7 @@ local REASONS = { elite = "elite", dungeon = "dungeon", ["sem coordenada"] = "se
 local function build(panel)
     local api, rows, data, offset, selected = {}, {}, {}, 0, nil
 
-    local follow = Theme.Button(panel, "Seguir o melhor hub", 126, 24, function() ns.Guide.FollowBest() end, "primary")
+    local follow = Theme.Button(panel, "Recalcular rota", 126, 24, function() ns.Guide.FollowBest() end, "primary")
     follow:SetPoint("TOPLEFT", 0, -4)
     local followSel = Theme.Button(panel, "Seguir este hub", 100, 24, function()
         if selected == "__bags" then ns.Guide.FollowBag()
@@ -180,6 +180,8 @@ local function build(panel)
         end
         local f = ns.Guide.failures
         local warn = f.first and ("|cFFFF6666Falha (" .. f.count .. "): " .. f.first .. "|r\n\n") or ""
+        local zone = ns.Guide.ZoneAdviceText(ns.Guide.ZoneAdvice()) -- spec 029, R19
+        warn = (zone and (zone .. "\n\n") or "") .. warn
         detail:SetText(warn .. (sel and circuitText(sel) or "|cFF888888Clique num hub para ver o circuito.|r"))
         scroll.child:SetHeight(detail:GetStringHeight() + 10)
     end

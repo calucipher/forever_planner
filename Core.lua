@@ -37,6 +37,15 @@ FP.defaults = {
     unavailableSeen = {},       -- visitas em que o NPC não ofereceu a quest (marca na 2ª, spec 014)
     weaponsOff = {},            -- armas que o jogador desabilitou na janela Armas (spec 016)
     groupAnnounce = true,       -- avisos de quest no chat do grupo (spec 022)
+    -- Sugestão de zona (spec 029, R17): estimativas até calibrar no jogo
+    zoneStay = 0.6,             -- fica enquanto render >= 60% da melhor alternativa
+    zoneLookahead = 2,          -- ao comparar zonas, conta o que abre em até 2 níveis
+    zoneMinVisit = 0.25,        -- zona com < 25% do XP do nível rende proporcionalmente menos
+    travelSame = 600,           -- viagem entre zonas do mesmo continente (s)
+    travelOther = 1200,         -- viagem entre continentes (s)
+    grindMinSpawns = 60,        -- grind só conta com pelo menos 60 spawns na faixa
+    unknownKills = 6,           -- quest nova do Forever sem objetivo na base
+    farDelivery = 300,          -- entrega em outra zona (s)
 }
 
 function FP.Print(...)
@@ -224,6 +233,7 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2)
     else -- QUEST_LOG_UPDATE, ZONE_CHANGED_NEW_AREA, PLAYER_LEVEL_UP
         if event == "QUEST_LOG_UPDATE" then FP.Fire("QUEST_LOG") end
         if event == "PLAYER_LEVEL_UP" then FP.Fire("LEVEL_UP", arg1) end -- spec 011
+        if event == "ZONE_CHANGED_NEW_AREA" then FP.Fire("ZONE") end -- spec 006, R19
         FP.Fire("CHANGED") -- a UI faz debounce
     end
 end)
@@ -245,6 +255,8 @@ SlashCmdList.FOREVERPLANNER = function(msg)
         ns.UI.Toggle()
     elseif cmd == "next" then
         ns.Planner.FollowBest()
+    elseif cmd == "zonas" then
+        ns.Guide.PrintZones() -- spec 029, R21
     elseif cmd == "guia" then
         ns.Guide.FollowBest()
     elseif cmd == "agressividade" and tonumber(rest) then
@@ -276,7 +288,7 @@ SlashCmdList.FOREVERPLANNER = function(msg)
         ns.QuickMenu.ShowWeapons()
     elseif cmd == "indisponiveis" then
         if rest == "limpar" then
-            ns.Planner.ClearUnavailable()
+            ns.Planner.ClearUnavailable("/fp indisponiveis limpar")
             FP.Print("marcas de quest indisponível apagadas.")
         else
             local n = 0

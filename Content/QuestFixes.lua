@@ -12,4 +12,11 @@ ns.QuestFixes = {
     -- 91920 > 91921 (Wowhead do Forever, 08/11/2026); a QuestieDB pede só a 430. Com a 430 feita e a
     -- 91920 no log, a Rane não ofereceu a 425 (visto no jogo em 08/11/2026). Confirmar ao fim da 91921.
     [425] = { preQuestSingle = { 91921 } },
+    -- Return to Quinn (Again) (Apothecary Renferrel): vem depois da Wild Eyes na mesma chain acima.
+    -- Com a 91920 no log, o Renferrel não ofereceu a 91921 (visto no jogo em 10/11/2026).
+    [91921] = { preQuestSingle = { 91920 } },
+    -- Your Reward has Arrived! (innkeepers): fora do plano (spec 023, R7). Sem requisito na QuestieDB,
+    -- o jogo não ofereceu (Innkeeper Norman, Undercity, visto no jogo em 10/11/2026). Pelo nome, é
+    -- entrega de recompensa, não de leveling (ESTIMATIVA: a condição real não está nos dados).
+    [60860] = { outOfPlan = true },
 }

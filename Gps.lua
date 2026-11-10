@@ -150,14 +150,14 @@ local function buildArrow()
     info:SetPoint("TOP", title, "BOTTOM", 0, -2); info:SetWidth(260); info:SetJustifyH("CENTER")
     f.info = info
 
-    -- Botão "+" (spec 006, R9): menu com Melhor hub, Ir entregar e Limpar o log.
+    -- Botão "+" (spec 006, R9): menu com Recalcular rota, Ir entregar e Limpar o log.
     local plus = CreateFrame("Button", nil, f)
     plus:SetSize(22, 22); plus:SetPoint("LEFT", tex, "RIGHT", 2, 0)
     local plusText = plus:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     plusText:SetPoint("CENTER"); plusText:SetText("+")
     plus:SetScript("OnClick", function(self) ns.QuickMenu.Toggle(self) end)
     plus:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Melhor hub · Ir entregar · Limpar o log"); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Recalcular rota · Ir entregar · Limpar o log"); GameTooltip:Show()
     end)
     plus:SetScript("OnLeave", function() GameTooltip:Hide() end)
 

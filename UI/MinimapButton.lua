@@ -30,7 +30,7 @@ local function showTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("|cFF9482C9Forever|r Planner", 1, 1, 1)
     GameTooltip:AddLine("Clique: abre/fecha o painel", 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("Clique direito: segue o melhor hub", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Clique direito: recalcula a rota (hub de maior XP/h da zona)", 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Arraste: move o botão", 0.6, 0.6, 0.7)
     GameTooltip:Show()
 end

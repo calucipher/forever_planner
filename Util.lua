@@ -14,6 +14,12 @@ function Util.HasBit(mask, bitValue)
     return floor(mask / bitValue) % 2 == 1
 end
 
+-- Spec 029, R5: flag de verdade. Diferente de HasBit, máscara 0 (ou nil) não tem flag nenhuma.
+function Util.HasFlag(mask, bitValue)
+    if not mask or mask == 0 or not bitValue or bitValue <= 0 then return false end
+    return floor(mask / bitValue) % 2 == 1
+end
+
 -- Falloff de XP de quest do Classic (mantido no Forever).
 function Util.XPFalloff(playerLevel, questLevel)
     local diff = (playerLevel or 0) - (questLevel or 0)
@@ -183,6 +189,46 @@ function Util.FixedQuestField(fixes, field, q, original)
     local fix = fixes and fixes[q]
     if fix and fix[field] ~= nil then return fix[field] end
     return original(q)
+end
+
+-- Spec 023, R5: quest de livro. Se um objeto que dá a quest solta um item do objetivo, o NPC que
+-- dá e também recebe é só a entrega e sai de quem dá. dropsOf(item) devolve os objetos que soltam o item.
+function Util.BookStarters(startedBy, finisherNpcs, objectiveItems, dropsOf)
+    local npcs, objects = startedBy and startedBy[1], startedBy and startedBy[2]
+    if not (npcs and npcs[1] and objects and objects[1] and finisherNpcs and finisherNpcs[1]) then return startedBy end
+    local isStartObject = {}
+    for _, o in ipairs(objects) do isStartObject[o] = true end
+    local book = false
+    for _, item in ipairs(objectiveItems or {}) do
+        for _, o in ipairs(dropsOf(item) or {}) do if isStartObject[o] then book = true end end
+    end
+    if not book then return startedBy end
+    local finishes = {}
+    for _, n in ipairs(finisherNpcs) do finishes[n] = true end
+    local kept = {}
+    for _, n in ipairs(npcs) do if not finishes[n] then kept[#kept + 1] = n end end
+    local out = {}
+    for k, v in pairs(startedBy) do out[k] = v end
+    out[1] = kept
+    return out
+end
+
+-- Spec 014, R11: progresso aberto direto? Sem lista de quests do mesmo NPC nos últimos `window` s.
+-- lastList = { guid, t } da última lista aberta (GOSSIP_SHOW/QUEST_GREETING), ou nil.
+function Util.DirectProgress(lastList, guid, now, window)
+    if not (lastList and lastList.guid == guid and lastList.t and now) then return true end
+    return now - lastList.t > window
+end
+
+-- Spec 006, R19: o jogador saiu da zona do hub seguido (e entrou em outra)?
+function Util.LeftHubZone(hubMap, fromZone, toZone)
+    return hubMap ~= nil and fromZone ~= nil and toZone ~= nil and hubMap == fromZone and toZone ~= fromZone
+end
+
+-- Spec 006, R19: o que fazer ao trocar de zona. "best", o hub guardado da zona nova, ou nil.
+function Util.ZoneHubAction(hubMap, fromZone, toZone, savedForTo)
+    if not Util.LeftHubZone(hubMap, fromZone, toZone) then return nil end
+    return savedForTo or "best"
 end
 
 -- Spec 021, R1: dica de lugar. Nomes de área sem repetir, sem vazio e sem a zona; "interior" no fim.

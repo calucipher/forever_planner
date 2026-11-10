@@ -5,7 +5,8 @@ local Menu = {}
 ns.QuickMenu = Menu
 
 local ITEMS = {
-    { "Melhor hub", function() ns.Guide.FollowBest("best") end, "Maior XP/h entre os hubs com 2+ quests" },
+    { "Recalcular rota", function() ns.Guide.FollowBest("best") end,
+        "Escolhe o hub de maior XP/h desta zona (2+ quests) e refaz a rota a partir de onde você está" },
     { "Ir entregar", function() ns.Guide.FollowBest("turnin") end, "Hub mais perto com quests prontas para entregar" },
     { "Bolsa", function() ns.Guide.FollowBag() end, "Segue a melhor quest que dá bolsa (zona atual primeiro)" },
     { "Classe", function() ns.ClassGuide.Follow() end, "Segue a melhor quest de classe (pets, bolsa de alma, montaria)" },
@@ -13,12 +14,8 @@ local ITEMS = {
     { "Armas", function() Menu.ShowWeapons() end, "Escolhe as armas que você usa e aponta a seta para o treinador" },
     { "Grupo", function() ns.Group.ShareAll() end, "Compartilha as quests do log com o grupo e manda um resumo do que falta" },
     { "Limpar o log", function() Menu.ShowCleanup() end, "Mostra quests que não valem a pena; abandona só se você confirmar" },
-    { "Reativar quests", function()
-        local n = 0
-        for _ in pairs(ns.FP.db.unavailable or {}) do n = n + 1 end
-        ns.Planner.ClearUnavailable()
-        ns.FP.Print(n .. " quest(s) que o jogo não oferecia voltaram ao plano.")
-    end, "Desfaz as marcas de quest indisponível (o addon marca sozinho quando o NPC não oferece a quest)" },
+    { "Reativar quests", function() ns.Planner.ConfirmClearUnavailable("menu +") end,
+        "Desfaz as marcas de quest indisponível (pede confirmação). Não serve para atualizar: para isso, 'Recalcular rota'." },
 }
 
 local function buildMenu()

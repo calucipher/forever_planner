@@ -253,7 +253,11 @@ local function pendingTurnIn()
     return false
 end
 
-function Planner.ClearUnavailable()
+-- origem: quem pediu (botão do painel, menu "+", comando), para o registro (R12).
+function Planner.ClearUnavailable(origem)
+    local n = 0
+    for _ in pairs(ns.FP.db.unavailable or {}) do n = n + 1 end
+    ns.FP.Debug(string.format("indisponível: %d marca(s) apagada(s) (%s)", n, tostring(origem or "?")))
     ns.FP.db.unavailable = {}
     ns.FP.db.unavailableSeen = {}
     ns.FP.db.unavailableRevived = {}
@@ -261,21 +265,28 @@ function Planner.ClearUnavailable()
     ns.FP.Fire("CHANGED")
 end
 
-function Planner.CheckOffers()
+local directOffered -- R11: o que a última lista do mesmo NPC ofereceu (só no modo direto)
+
+-- event: evento do diálogo. "QUEST_PROGRESS" (R11): progresso aberto sem lista; nada oferecido, e
+-- entrega pendente se a quest do progresso fecha.
+function Planner.CheckOffers(event)
+    local direct = event == "QUEST_PROGRESS"
     local D = ns.Data
     if not (D.Q and D.N and _G.UnitGUID) then return end
     local kind, id = ns.Util.EntityFromGUID(_G.UnitGUID("npc"))
     if not kind then return end
     local source = kind == "npc" and D.N or D.O
     local level = UnitLevel("player")
-    local offered, candidates = offeredIDs(), {}
-    local turnInPending = pendingTurnIn() -- R9: a próxima da chain só aparece depois da entrega
+    local offered, candidates = direct and (directOffered or {}) or offeredIDs(), {}
+    local turnInPending -- R9: a próxima da chain só aparece depois da entrega
+    if direct then turnInPending = _G.IsQuestCompletable and _G.IsQuestCompletable() == true
+    else turnInPending = pendingTurnIn() end
     for _, q in ipairs(source.questStarts(id) or {}) do
         if offered[q] then
             ns.FP.db.unavailableSeen[q] = nil
             if ns.FP.db.unavailableRevived then ns.FP.db.unavailableRevived[q] = nil end -- R10: oferecida, pode reativar de novo
             if D.IsUnavailable(q) then ns.FP.db.unavailable[q] = nil; ns.FP.Debug("indisponível: voltou " .. q) end
-        elseif not turnInPending and not D.IsOnQuest(q) and not D.IsUnavailable(q) and D.IsRelevant(q, level) and D.IsEligible(q, level) then
+        elseif not turnInPending and D.StartsQuest(kind, id, q) and not D.IsOnQuest(q) and not D.IsUnavailable(q) and D.IsRelevant(q, level) and D.IsEligible(q, level) then
             candidates[#candidates + 1] = q
         end
     end
@@ -291,7 +302,7 @@ function Planner.CheckOffers()
         ns.FP.db.unavailable[q] = true
         changed = true
         ns.FP.Debug(string.format("indisponível: %s não oferecida (%s %s)", q, kind, id))
-        ns.FP.Print(string.format("|cFFFFAA00%s não está disponível aqui; tirei do plano.|r (botão '+' da seta, 'Reativar quests', desfaz)",
+        ns.FP.Print(string.format("|cFFFFAA00%s não está disponível aqui; tirei do plano.|r Volta sozinha quando o NPC oferecer. (/fp indisponiveis lista as marcadas)",
             D.Q.name(q) or q))
         if ns.FP.db.following == q then Planner.FollowBest() end
         end
@@ -299,11 +310,48 @@ function Planner.CheckOffers()
     if changed then
         if ns.Guide then ns.Guide.Invalidate() end
         ns.FP.Fire("CHANGED")
+        -- R12: a seta sai da quest marcada na hora.
+        if ns.Guide and ns.FP.db.guide then ns.FP.AfterCombat("guideStep", function() ns.Guide.Step() end) end
     end
 end
 
+-- R12: "Reativar quests" pede confirmação, listando o que volta ao plano.
+function Planner.ConfirmClearUnavailable(origem)
+    local names = {}
+    for q in pairs(ns.FP.db.unavailable or {}) do
+        names[#names + 1] = (ns.Data.Q and ns.Data.Q.name(q)) or tostring(q)
+    end
+    if #names == 0 then ns.FP.Print("nenhuma quest marcada como indisponível."); return end
+    table.sort(names)
+    local dialogs, show = _G.StaticPopupDialogs, _G.StaticPopup_Show
+    local function run()
+        Planner.ClearUnavailable(origem)
+        ns.FP.Print(#names .. " quest(s) que o jogo não oferecia voltaram ao plano.")
+    end
+    if not (dialogs and show) then run(); return end
+    dialogs.FOREVERPLANNER_REATIVAR = {
+        text = "Voltar ao plano as quests que o jogo não ofereceu?\n\n%s\n\n(Para só atualizar a seta, use 'Recalcular rota'.)",
+        button1 = "Reativar", button2 = "Cancelar", OnAccept = run,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    show("FOREVERPLANNER_REATIVAR", table.concat(names, "\n"))
+end
+
+local PROGRESS_WINDOW = 60 -- R11: lista ou progresso do mesmo NPC nesse intervalo já contou a visita
+local lastList, lastDirect
 ns.FP.On("QUEST_DIALOG", function(event)
-    if event == "GOSSIP_SHOW" or event == "QUEST_GREETING" then Planner.CheckOffers() end
+    local guid = _G.UnitGUID and _G.UnitGUID("npc")
+    local now = _G.GetTime and _G.GetTime()
+    if event == "GOSSIP_SHOW" or event == "QUEST_GREETING" then
+        lastList = { guid = guid, t = now, offered = offeredIDs() }
+        Planner.CheckOffers(event)
+    elseif event == "QUEST_PROGRESS" and guid and ns.Util.DirectProgress(lastList, guid, now, PROGRESS_WINDOW)
+        and ns.Util.DirectProgress(lastDirect, guid, now, PROGRESS_WINDOW) then
+        lastDirect = { guid = guid, t = now }
+        directOffered = lastList and lastList.guid == guid and lastList.offered or nil
+        Planner.CheckOffers(event)
+        directOffered = nil
+    end
 end)
 
 -- Spec 014, R8: entregar uma quest reativa as marcadas do mesmo hub (a chain pode ter liberado).

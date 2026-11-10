@@ -180,7 +180,8 @@ function Leveling.SelectQuests(entries, threshold)
     local avg = totalS > 0 and totalV / totalS or 0
     local weak = {}
     for _, e in ipairs(entries) do
-        local rate = e.seconds > 0 and e.value / e.seconds or huge
+        -- Spec 029, R1: `unlock` (XP que a quest destrava) entra no corte, não na média.
+        local rate = e.seconds > 0 and (e.value + (e.unlock or 0)) / e.seconds or huge
         if not e.locked and rate < (threshold or 0) * avg then weak[e.id] = true end
     end
     for _, e in ipairs(entries) do
@@ -317,13 +318,74 @@ end
 
 local function appendAll(dst, src) for _, v in ipairs(src) do dst[#dst + 1] = v end end
 
+-- R13a (spec 002): requisitos de uma quest dentro do circuito. single: alternativas (basta uma);
+-- group e prevInChain: obrigatórios. Alternativa já feita libera todas. Devolve requires (todas,
+-- para a ordem do R13) e requiresAny (as alternativas que ainda contam).
+function Leveling.CircuitRequires(single, group, prevInChain, inCircuit, done)
+    local requires, any, seen = {}, {}, {}
+    local function add(list, q)
+        if not seen[q] then seen[q] = true; requires[#requires + 1] = q end
+        if list then list[#list + 1] = q end
+    end
+    local freed = false
+    for _, q in ipairs(single or {}) do if done[q] then freed = true end end
+    if not freed then
+        for _, q in ipairs(single or {}) do if inCircuit[q] then add(any, q) end end
+    end
+    for _, q in ipairs(group or {}) do if inCircuit[q] then add(nil, q) end end
+    for _, q in ipairs(prevInChain or {}) do if inCircuit[q] then add(nil, q) end end
+    return requires, any
+end
+
+-- Motivo para a quest ficar de fora por depender de quem ficou (R13a), ou nil.
+local function blockedBy(q, out)
+    if q.state ~= "pegar" then return nil end -- R34: quest do log não sai
+    local isAny = {}
+    for _, r in ipairs(q.requiresAny or {}) do isAny[r] = true end
+    for _, r in ipairs(q.requires or {}) do
+        if not isAny[r] and out[r] then return r end
+    end
+    local first
+    for _, r in ipairs(q.requiresAny or {}) do
+        if not out[r] then return nil end
+        first = first or r
+    end
+    return first
+end
+
+-- R13a: quem depende de quest que ficou de fora também fica de fora, em cadeia.
+-- items: lista; questOf(item) devolve a quest; out: { [id] = true } das que já ficaram de fora.
+local function dropDependents(items, questOf, out, aside)
+    local changed = true
+    while changed do
+        changed = false
+        for _, it in ipairs(items) do
+            local q = questOf(it)
+            local pre = not out[q.id] and blockedBy(q, out)
+            if pre then
+                out[q.id], changed = true, true
+                aside[#aside + 1] = { id = q.id, reason = "depende de " .. pre }
+            end
+        end
+    end
+    local left = {}
+    for _, it in ipairs(items) do if not out[questOf(it).id] then left[#left + 1] = it end end
+    return left
+end
+
+local function itself(q) return q end
+local function questOfEntry(e) return e.quest end
+
 function Leveling.BuildCircuit(quests, start, p, dist)
-    local aside, candidates, byId = {}, {}, {}
+    local aside, candidates, out = {}, {}, {}
     for _, q in ipairs(quests) do
         local why = asideReason(q, p)
-        if why then aside[#aside + 1] = { id = q.id, reason = why }
-        else candidates[#candidates + 1] = q; byId[q.id] = q end
+        if why then aside[#aside + 1] = { id = q.id, reason = why }; out[q.id] = true
+        else candidates[#candidates + 1] = q end
     end
+    candidates = dropDependents(candidates, itself, out, aside)
+    local byId = {}
+    for _, q in ipairs(candidates) do byId[q.id] = q end
 
     local entries = {}
     for _, q in ipairs(candidates) do
@@ -333,7 +395,43 @@ function Leveling.BuildCircuit(quests, start, p, dist)
     end
     local kept, dropped = Leveling.SelectQuests(entries, p.threshold or 0)
     for _, e in ipairs(dropped) do aside[#aside + 1] = { id = e.id, reason = "abaixo do limiar" } end
-    kept = fitLog(kept, p, aside)
+    for _, e in ipairs(dropped) do out[e.id] = true end
+    -- R13a + R15: refaz o corte do log sem quem saiu por depender, até não mudar.
+    local pool = kept
+    while true do
+        local logAside, trialOut = {}, {}
+        for k in pairs(out) do trialOut[k] = true end
+        local fitted = fitLog(pool, p, logAside)
+        local fittedIds = {}
+        for _, e in ipairs(fitted) do fittedIds[e.id] = true end
+        for _, e in ipairs(pool) do if not fittedIds[e.id] then trialOut[e.id] = true end end
+        local depAside = {}
+        local left = dropDependents(fitted, questOfEntry, trialOut, depAside)
+        if #depAside == 0 then
+            appendAll(aside, logAside)
+            kept = left
+            break
+        end
+        appendAll(aside, depAside)
+        local gone = {}
+        for _, a in ipairs(depAside) do gone[a.id] = true; out[a.id] = true end
+        local nextPool = {}
+        for _, e in ipairs(pool) do if not gone[e.id] then nextPool[#nextPool + 1] = e end end
+        pool = nextPool
+    end
+    -- R13a + R28: quem ficou só por cadeia e perdeu o dependente volta a ser "abaixo do limiar".
+    -- Repete até não mudar: numa cadeia de vários elos, tirar um elo pode soltar o anterior.
+    repeat
+        local needed = {}
+        for _, e in ipairs(kept) do for _, r in ipairs(e.quest.requires or {}) do needed[r] = true end end
+        local final = {}
+        for _, e in ipairs(kept) do
+            if e.chain and not needed[e.id] then aside[#aside + 1] = { id = e.id, reason = "abaixo do limiar" }
+            else final[#final + 1] = e end
+        end
+        local changed = #final < #kept
+        kept = final
+    until not changed
 
     -- Rodada 2: quem depende de uma quest do próprio circuito entra depois da entrega dela (R13).
     local inCircuit = {}

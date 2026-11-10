@@ -236,11 +236,13 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
     end
     for _, q in ipairs(hub.questList) do
         if not seen[q] and not D.IsCompleted(q) then
-            local requires = {}
-            for _, pre in ipairs(D.Prerequisites(q)) do if inCircuit[pre] then requires[#requires + 1] = pre end end
-            for _, pre in ipairs(nextOf[q] or {}) do requires[#requires + 1] = pre end
+            local done = setmetatable({}, { __index = function(_, p) return D.IsCompleted(p) end })
+            local requires, any = ns.Leveling.CircuitRequires(D.Q.preQuestSingle(q), D.Q.preQuestGroup(q),
+                nextOf[q], inCircuit, done) -- spec 002, R13a
             if #requires > 0 and D.IsEligible(q, level, inCircuit) and D.IsRelevant(q, level) then
-                add(safeInfo(q, level, requires))
+                local info = safeInfo(q, level, requires)
+                if info then info.requiresAny = any end
+                add(info)
             end
         end
     end
@@ -404,7 +406,8 @@ function Guide.Follow(key)
 end
 
 -- mode: "best" (R7), "turnin" (Ir entregar) ou "next" (fim de circuito, R6).
-function Guide.FollowBest(mode)
+-- quiet: sem hub na zona, não avisa no chat (troca de zona, R19).
+function Guide.FollowBest(mode, quiet)
     mode = mode or "best"
     ns.FP.AfterCombat("guideBest", function()
         local rows, cands, byKey = Guide.Rank(), {}, {}
@@ -422,6 +425,8 @@ function Guide.FollowBest(mode)
                 or string.format("%s XP/h", Util.FormatInt(best.circuit.rate))
             ns.FP.Print("seguindo:", best.name, "(" .. why .. ")")
             Guide.Follow(best.key)
+        elseif quiet then -- R19: sem hub na zona nova, o hub seguido continua
+            ns.FP.Debug("zona: sem hub na zona nova; hub seguido mantido")
         elseif mode == "turnin" then
             ns.FP.Print("nenhuma quest pronta para entregar nesta zona.")
         else
@@ -563,6 +568,35 @@ local function burst() refreshIn(0.3); refreshIn(1); refreshIn(3) end
 ns.FP.On("QUEST_ACCEPTED", burst)
 ns.FP.On("QUEST_TURNED_IN", burst)
 ns.FP.On("QUEST_REMOVED", function() refreshIn(0.3) end)
+-- R19 (spec 006): saiu da zona do hub seguido, segue o melhor hub da zona nova.
+local lastZone
+local function playerZone() return Guide.ZoneMap(C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")) end
+local function hubMapOf(key) return key and tonumber(key:match("^(%d+):")) end
+local function hasCircuit(key)
+    local row = Guide.Find(key)
+    return row ~= nil and #row.circuit.stops > 0
+end
+ns.FP.On("ZONE", function()
+    local to = playerZone()
+    if not (to and dataReady()) then return end -- mapa nil (carregando, táxi) ou dados carregando
+    local from = lastZone
+    lastZone = to
+    ns.FP.AfterCombat("guideZone", function()
+        local g = ns.FP.db and ns.FP.db.guide
+        local now = playerZone()
+        if not (g and g.hub) or now ~= to then return end -- em combate, voltou ou mudou de novo
+        local byZone = ns.FP.db.hubByZone or {}
+        ns.FP.db.hubByZone = byZone
+        local saved = byZone[to]
+        if saved and not hasCircuit(saved) then saved = nil end
+        local action = ns.Util.ZoneHubAction(hubMapOf(g.hub), from, to, saved)
+        if not action then return end
+        ns.FP.Debug(string.format("zona: saiu de %s para %s, hub %s, ação %s", tostring(from), tostring(to), g.hub, action))
+        byZone[from] = g.hub
+        if action == "best" then Guide.FollowBest("best", true) else Guide.Follow(action) end
+    end)
+end)
+ns.FP.On("READY", function() lastZone = lastZone or playerZone() end)
 ns.FP.On("GPS_ARRIVED", function()
     local cur = Guide.current
     if cur and cur.id:find("^objetivo:") then cur.visited[cur.point] = true end -- R13
@@ -570,5 +604,237 @@ ns.FP.On("GPS_ARRIVED", function()
 end)
 ns.FP.On("READY", function() C_Timer.After(1, invalidateAndStep) end) -- R4: retoma depois do /reload
 ns.FP.On("DATA_READY", invalidateAndStep) -- R4: o índice termina segundos depois do READY
+
+------------------------------------------------------------------------------------------
+-- Sugestão de zona (spec 029): ficar, ir para outra zona ou fazer grind
+------------------------------------------------------------------------------------------
+local function zoneParams()
+    local db, L = ns.FP.db, ns.Leveling
+    return { perKill = ns.FP.KillSeconds(), factor = ns.FP.MobXPFactor(), minSpawns = db.grindMinSpawns,
+        overhead = L.OVERHEAD, legYards = L.UNKNOWN_LEG, speed = db.runSpeed or 7, objectSeconds = L.OBJECT_SECONDS,
+        farDelivery = db.farDelivery, unknownKills = db.unknownKills, travelSame = db.travelSame,
+        travelOther = db.travelOther, stay = db.zoneStay, minVisit = db.zoneMinVisit,
+        lookahead = db.zoneLookahead, threshold = db.threshold or 0.5 }
+end
+Guide.ZoneParams = zoneParams -- tools/pesquisa_zonas.lua usa os mesmos parâmetros (R23)
+
+local doneLookup = setmetatable({}, { __index = function(_, q) return ns.Data.IsCompleted(q) end })
+
+-- Valor e tempo de uma quest do catálogo no nível L (R9, R10, R12). Também usada pela pesquisa.
+function Guide.ZoneQuestEntry(info, L, p, unlock)
+    local D, Z = ns.Data, ns.Zones
+    local q = info.id
+    local kills, objects, mobXP = 0, 0, 0
+    for _, o in ipairs(D.Objectives(q, L, p.factor)) do
+        kills, objects, mobXP = kills + o.kills, objects + o.objects, mobXP + o.kills * o.mobXP
+    end
+    local seconds, used = Z.QuestSeconds({ kills = kills, objects = objects, far = info.far,
+        unknownWork = info.unknownWork }, p)
+    if info.unknownWork then mobXP = used * ns.Leveling.MobXPRange(L, info.level, info.level, p.factor) end
+    return { id = q, value = (D.QuestXP(q, L)) + mobXP, seconds = seconds, unlock = unlock or 0,
+        requires = D.Prerequisites(q) }
+end
+
+-- Oferta de uma zona no nível L (R12), com o XP que as cadeias destravam (R2) e a cinza que destrava (R3).
+local function zoneOffer(cat, zone, L, p)
+    local D, Z = ns.Data, ns.Zones
+    local entries = {}
+    for _, q in ipairs(cat.zones[zone].quests) do
+        local info = cat.info[q]
+        if info.solo and info.level <= L + 3 and D.IsEligible(q, L) then
+            local unlock = Z.ChainAhead(q, cat, zone, L, doneLookup)
+            local gray = L - info.level >= 10
+            if D.IsRelevant(q, L) or (gray and unlock > 0 and D.IsRelevant(q, info.level)) then
+                entries[#entries + 1] = Guide.ZoneQuestEntry(info, L, p, unlock)
+            end
+        end
+    end
+    local o = Z.Offer(entries, p.threshold, function(id, seen) return Z.ChainAhead(id, cat, zone, L, doneLookup, seen) end)
+    o.estimated = 0 -- R9: quests novas do Forever da oferta com XP pela mediana
+    for _, e in ipairs(o.kept) do
+        local info = cat.info[e.id]
+        if info.forever and info.xpSrc == "estimativa" then o.estimated = o.estimated + 1 end
+    end
+    return o
+end
+
+local function areaName(area)
+    if not area then return "zona desconhecida" end
+    local map = ns.Data.areaToMap[area]
+    local info = map and C_Map.GetMapInfo and C_Map.GetMapInfo(map)
+    return info and info.name or ("área " .. tostring(area))
+end
+Guide.AreaName = areaName
+
+-- Faixa de nível dos mobs que contam no grind (R19).
+local function grindLevels(hist, L)
+    local lo, hi
+    for l, s in pairs(hist) do
+        if s > 0 and ns.Leveling.MobXP(L, l, 1) > 0 and l <= L + 2 then
+            lo, hi = math.min(lo or l, l), math.max(hi or l, l)
+        end
+    end
+    return lo, hi
+end
+
+function Guide.PlayerArea()
+    local D = ns.Data
+    local map = Guide.ZoneMap(C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player"))
+    local area = map and D.mapToArea[map]
+    return area and D.ZoneOfArea(area), map
+end
+
+-- R15: XP/h de grind das zonas do mapa de continentes (fora instância e campo de batalha).
+local GRIND_MARGIN = 0.15
+function Guide.GrindRates(cat, L, p)
+    local out = {}
+    for zone, z in pairs(cat.zones) do
+        if z.continent then out[#out + 1] = { zone = zone, rate = (ns.Zones.GrindRate(z.hist, L, p)) } end
+    end
+    table.sort(out, function(a, b) return a.zone < b.zone end) -- ordem estável
+    return out
+end
+
+-- Cálculo completo, síncrono (os testes chamam direto). yield, opcional, é chamado a cada zona.
+function Guide.ComputeZoneAdvice(yield)
+    local D, Z = ns.Data, ns.Zones
+    local cat = D.zoneCatalog
+    local L = UnitLevel("player")
+    local levelXP = Z.LevelXP(L)
+    if not (cat and levelXP) then return nil end
+    local p = zoneParams()
+    local here = Guide.PlayerArea()
+    local hereCont = here and cat.zones[here] and cat.zones[here].continent
+    local cur = { zone = here, rate = 0, n = 0 }
+    local cands = {}
+    for zone, z in pairs(cat.zones) do
+        if #z.quests > 0 then
+            local o = zoneOffer(cat, zone, L, p)
+            if zone == here then
+                cur.rate, cur.n, cur.offer = o.rate, o.n, o
+            elseif o.n > 0 then
+                local travel = Z.Travel(here, zone, hereCont, z.continent, p)
+                local ahead = zoneOffer(cat, zone, math.min(L + p.lookahead, #Z.LEVEL_XP), p)
+                local potential = math.max(o.value + o.unlock, ahead.value)
+                local raw, eff = Z.Effective(o, travel, potential, levelXP, p.minVisit)
+                cands[#cands + 1] = { zone = zone, raw = raw, eff = eff, n = o.n, travel = travel, offer = o,
+                    estimated = o.estimated, anyRace = z.anyRace }
+            end
+        end
+        if yield then yield() end
+    end
+    local grind = Z.PickGrind(Guide.GrindRates(cat, L, p), here, GRIND_MARGIN)
+    table.sort(cands, function(a, b) return a.eff > b.eff end)
+    local d = Z.Decide(cur, cands, grind, p)
+    if grind.zone and cat.zones[grind.zone] then grind.lo, grind.hi = grindLevels(cat.zones[grind.zone].hist, L) end
+    d.level, d.here, d.cur, d.cands, d.grind = L, here, cur, cands, grind
+    for _, c in ipairs(cands) do if c.zone == d.zone then d.target = c end end
+    return d
+end
+
+-- R18: recálculo fora de combate, em coroutine, com cache por nível + entregas + zona.
+local advice = { key = nil, turnIns = 0, lastNotice = nil, running = false, pending = false, frame = nil }
+function Guide.ZoneAdvice() return advice.result end
+
+local function notify(d)
+    if not d or d.action == "stay" then advice.lastNotice = nil; return end
+    local key = d.action .. ":" .. tostring(d.zone) .. ":" .. d.level
+    if advice.lastNotice == key then return end -- R20: uma vez por ação, zona e nível
+    advice.lastNotice = key
+    local what = d.action == "go" and ("ir para " .. areaName(d.zone)) or ("grind em " .. areaName(d.zone))
+    ns.FP.Print("zona: " .. what .. " (" .. d.reason .. ", est.)")
+end
+
+function Guide.RefreshZoneAdvice()
+    ns.FP.AfterCombat("zoneAdvice", function()
+        if not ns.Data.zoneCatalog then return end
+        if advice.running then advice.pending = true; return end -- recalcula ao terminar
+        local key = table.concat({ UnitLevel("player"), advice.turnIns, tostring(Guide.PlayerArea()),
+            tostring(ns.FP.db.threshold) }, ":")
+        if key == advice.key then return end
+        advice.running, advice.pending = true, false
+        local started = _G.debugprofilestop and _G.debugprofilestop()
+        local co = coroutine.create(function() return Guide.ComputeZoneAdvice(coroutine.yield) end)
+        advice.frame = advice.frame or CreateFrame("Frame")
+        advice.frame:SetScript("OnUpdate", function(self)
+            if Util.InCombat() then return end -- constituição 6: pausa no combate
+            local ok, res = coroutine.resume(co)
+            if not ok then
+                self:SetScript("OnUpdate", nil); advice.running = false
+                ns.FP.Debug("sugestão de zona: erro " .. tostring(res))
+                return
+            end
+            if coroutine.status(co) == "dead" then
+                self:SetScript("OnUpdate", nil)
+                advice.running, advice.key, advice.result = false, key, res
+                local ms = started and (_G.debugprofilestop() - started)
+                ns.FP.Debug(string.format("sugestão de zona: %s %s (%s)%s", res and res.action or "nada",
+                    res and tostring(res.zone) or "", res and res.reason or "", ms and string.format(" %.0f ms", ms) or ""))
+                notify(res)
+                ns.FP.Fire("CHANGED")
+                if advice.pending then Guide.RefreshZoneAdvice() end
+            end
+        end)
+    end)
+end
+
+local turnInToken = 0
+ns.FP.On("QUEST_TURNED_IN", function()
+    advice.turnIns = advice.turnIns + 1
+    turnInToken = turnInToken + 1
+    local mine = turnInToken
+    C_Timer.After(3, function() if mine == turnInToken then Guide.RefreshZoneAdvice() end end) -- junta entregas
+end)
+ns.FP.On("LEVEL_UP", function() C_Timer.After(1, Guide.RefreshZoneAdvice) end)
+ns.FP.On("ZONE", function() C_Timer.After(2, Guide.RefreshZoneAdvice) end)
+ns.FP.On("ZONE_CATALOG", Guide.RefreshZoneAdvice)
+
+-- R19: duas linhas para a aba Guia (sempre com "est.").
+function Guide.ZoneAdviceText(d)
+    if not d then return nil end
+    local F = Util.FormatInt
+    local here = string.format("|cFFB38CFFAqui:|r %s — %d quests, %s XP/h (est.)", areaName(d.here), d.cur.n,
+        F(math.floor(d.cur.rate + 0.5)))
+    local tip
+    if d.action == "stay" then
+        tip = "|cFF73E65ASugestão:|r ficar (" .. d.reason .. ", est.)"
+    elseif d.action == "go" then
+        local t = d.target
+        tip = string.format("|cFFFFD24DSugestão:|r ir para %s — %s XP/h, viagem ~%d min (%s, est.)", areaName(d.zone),
+            F(math.floor((t and t.eff or 0) + 0.5)), math.floor((t and t.travel or 0) / 60 + 0.5), d.reason)
+        if t and (t.estimated or 0) > 0 then tip = tip .. "; XP das quests novas do Forever é estimado" end
+    else
+        local g = d.grind
+        local mobs = (g.lo and g.hi) and string.format("mobs %d–%d, ", g.lo, g.hi) or ""
+        tip = string.format("|cFFFFD24DSugestão:|r grind em %s — %s%s XP/h (%s, est.)", areaName(d.zone), mobs,
+            F(math.floor(g.rate + 0.5)), d.reason)
+    end
+    return here .. "\n" .. tip
+end
+
+-- R21: /fp zonas, as 5 melhores zonas do nível e o melhor grind.
+function Guide.PrintZones()
+    ns.FP.AfterCombat("zoneList", function()
+        if not ns.Data.zoneCatalog then ns.FP.Print("zonas: catálogo ainda montando, tente em alguns segundos."); return end
+        local d = Guide.ComputeZoneAdvice()
+        if not d then ns.FP.Print("zonas: nada a sugerir neste nível."); return end
+        local F = Util.FormatInt
+        ns.FP.Print(string.format("zonas para o nível %d (estimativa):", d.level))
+        for i = 1, math.min(5, #d.cands) do
+            local c = d.cands[i]
+            local extra = ""
+            if (c.estimated or 0) > 0 then extra = extra .. string.format(", %d novas do Forever com XP estimado", c.estimated) end
+            if (c.anyRace or 0) > 0 then extra = extra .. string.format(", %d sem raça na base", c.anyRace) end
+            ns.FP.Print(string.format("%d. %s: %s XP/h, %d quests, viagem ~%d min%s", i, areaName(c.zone),
+                F(math.floor(c.eff + 0.5)), c.n, math.floor(c.travel / 60 + 0.5), extra))
+        end
+        local g = d.grind
+        if g.zone and g.rate > 0 then
+            ns.FP.Print(string.format("melhor grind: %s%s, %s XP/h", areaName(g.zone),
+                (g.lo and g.hi) and string.format(" (mobs %d–%d)", g.lo, g.hi) or "", F(math.floor(g.rate + 0.5))))
+        end
+        ns.FP.Print((Guide.ZoneAdviceText(d):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")))
+    end)
+end
 
 return Guide

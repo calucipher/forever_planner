@@ -59,6 +59,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 | `/fp diag` | Retrato do estado do guia no chat e no registro |
 | `/fp auto` | Liga ou desliga o auto accept e o auto turn-in (padrão: ligado) |
 | `/fp guia` | GPS segue o circuito do melhor hub da zona |
+| `/fp zonas` | As 5 melhores zonas para o seu nível (XP/h, quests, viagem) e o melhor lugar para grind |
 | `/fp next` | GPS segue a melhor quest da zona |
 | `/fp clear` | Para o GPS |
 | `/fp preset affliction\|demonology\|destruction` | Troca o perfil de pesos |
@@ -73,6 +74,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 - O guia fica no hub que você escolheu até ele acabar; aí segue primeiro o hub com entregas prontas. Entregas prontas são feitas assim que você chega no NPC.
 - **Botão do minimapa**: clique abre/fecha o painel, clique direito segue o melhor hub, arraste para mover. O addon também aparece no menu de addons do minimapa.
 - Na aba **Guia**, clique num hub para ver o circuito e em *Seguir este hub*. O GPS aponta a próxima parada e avança sozinho quando você pega, cumpre ou entrega.
+- **Sugestão de zona**: no topo da aba Guia, quanto a zona atual rende e se vale ficar, ir para outra zona ou fazer grind (e onde). O chat avisa uma vez quando a zona acabou. É estimativa: conta a viagem e as cadeias, e fica melhor depois da calibração.
 - Depois de 5 mortes, o tempo por morte e o fator de XP passam a ser os medidos no jogo (`/fp calib`).
 - Clique numa quest para o GPS segui-la.
 - Clique direito na seta para parar o GPS.

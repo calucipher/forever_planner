@@ -30,6 +30,36 @@ function Data.WithFixes(quest, fixes)
     return fixed
 end
 
+-- Spec 023, R5: startedBy sem o NPC que só recebe o livro (resultado guardado por quest).
+function Data.WithBookStarters(quest, item)
+    if not (quest and quest.startedBy and quest.finishedBy and quest.objectives and item and item.objectDrops) then
+        return quest
+    end
+    local wrapped, cache = setmetatable({}, { __index = quest }), {}
+    local function dropsOf(id) return item.objectDrops(id) end
+    function wrapped.startedBy(q)
+        if cache[q] == nil then
+            local s = quest.startedBy(q)
+            if s and s[1] and s[1][1] and s[2] and s[2][1] then
+                local items = {}
+                for _, it in ipairs((quest.objectives(q) or {})[3] or {}) do items[#items + 1] = it[1] end
+                local finisher = quest.finishedBy(q)
+                s = Util.BookStarters(s, finisher and finisher[1], items, dropsOf)
+            end
+            cache[q] = s or false
+        end
+        return cache[q] or nil
+    end
+    return wrapped
+end
+
+-- Spec 023, R6: o NPC está entre quem dá a quest (startedBy corrigido)?
+function Data.StartsQuest(kind, id, q)
+    local s = Data.Q.startedBy(q) or {}
+    for _, x in ipairs(s[kind == "npc" and 1 or 2] or {}) do if x == id then return true end end
+    return false
+end
+
 function Data.Init()
     local L = _G.LibQuestieDB
     if not L then return false, "QuestieDB não está instalado/ativo. Instale a versão Forever." end
@@ -37,7 +67,8 @@ function Data.Init()
         local ok, msg = L.RequireContract(4)
         if not ok then return false, msg end
     end
-    Data.L, Data.Q, Data.N, Data.I, Data.O = L, Data.WithFixes(L.Quest, ns.QuestFixes), L.Npc, L.Item, L.Object
+    Data.L, Data.N, Data.I, Data.O = L, L.Npc, L.Item, L.Object
+    Data.Q = Data.WithBookStarters(Data.WithFixes(L.Quest, ns.QuestFixes), L.Item)
 
     local zdb = L.Support.Get("ZoneDB") or {}
     local priv = zdb.private or {}
@@ -46,6 +77,9 @@ function Data.Init()
     Data.mapToArea = loadZoneTable(priv.uiMapIdToAreaId)
 
     Data.dungeons = priv.dungeons or {}
+    Data.subToParent = loadZoneTable(priv.subZoneToParentZone) -- spec 029, R6
+    for k, v in pairs(loadZoneTable(priv.subZoneToParentZoneOverride)) do Data.subToParent[k] = v end
+    Data.factionTemplate = (L.Support.Get("QuestieDB") or {}).factionTemplate or {} -- spec 029, R7
 
     local xp = L.Support.Get("QuestXP")
     Data.baseXP = (xp and xp.db) or {}
@@ -78,6 +112,7 @@ function Data.MarkReady()
     ns.FP.Debug("dados prontos (índice de recompensas)")
     ns.FP.Fire("DATA_READY")
     ns.FP.Fire("CHANGED")
+    Data.BuildZoneCatalog() -- spec 029, R6
 end
 
 -- Índice questID -> itens, em coroutine para não travar o login
@@ -201,6 +236,8 @@ end
 -- Vale entrar no planejador? (política do addon, separada das regras da quest)
 function Data.IsRelevant(q, level)
     if Data.IsOnQuest(q) then return true end
+    local fix = ns.QuestFixes and ns.QuestFixes[q]
+    if fix and fix.outOfPlan then return false end -- spec 023, R7
     if not excludedSort then buildExcludedSorts() end
     local zone = Data.Q.zoneOrSort(q) or 0
     if zone < 0 and excludedSort[zone] then return false end
@@ -759,6 +796,157 @@ function Data.QuestsForMap(mapID)
     end
     mapIndex[mapID] = list
     return list
+end
+
+------------------------------------------------------------------------------------------
+-- Catálogo de zonas (spec 029, R6–R11): montado uma vez por sessão, em coroutine
+------------------------------------------------------------------------------------------
+-- Área -> zona-mãe (subZoneToParentZone da QuestieDB); instância fica com o próprio ID.
+function Data.ZoneOfArea(area)
+    local C = ns.ZoneContent or {}
+    if not area or (C.instances and C.instances[area]) or Data.dungeons[area] then return area end
+    return (Data.subToParent and Data.subToParent[area]) or area
+end
+
+local function giverZones(g)
+    local zs = {}
+    for _, n in ipairs(g and g[1] or {}) do
+        for a in pairs(Data.N.spawns(n) or {}) do zs[Data.ZoneOfArea(a)] = true end
+    end
+    for _, o in ipairs(g and g[2] or {}) do
+        for a in pairs(Data.O.spawns(o) or {}) do zs[Data.ZoneOfArea(a)] = true end
+    end
+    return zs
+end
+
+-- R10: ninguém da entrega na zona de quem dá a quest.
+local function farDelivery(q)
+    local from, to = giverZones(Data.Q.startedBy(q)), giverZones(Data.Q.finishedBy(q))
+    if not next(from) or not next(to) then return false end
+    for z in pairs(to) do if from[z] then return false end end
+    return true
+end
+
+local function noObjectives(q)
+    local o = Data.Q.objectives(q) or {}
+    return #(o[1] or {}) + #(o[2] or {}) + #(o[3] or {}) + #(o[5] or {}) == 0
+end
+
+-- R8: quest de zona que entra no catálogo do personagem.
+local function catalogQuest(q, faction)
+    local Q, C = Data.Q, ns.ZoneContent or {}
+    local area = Q.zoneOrSort(q) or 0
+    if area <= 0 then return nil end
+    if not (Util.HasBit(Q.requiredRaces(q), Data.raceMask) and Util.HasBit(Q.requiredClasses(q), Data.classMask)) then
+        return nil
+    end
+    if Q.requiredSkill(q) or (C.professionAreas and C.professionAreas[area]) then return nil end
+    if Data.IsExcludedSort(q) then return nil end
+    local fix = ns.QuestFixes and ns.QuestFixes[q]
+    if fix and fix.outOfPlan then return nil end
+    local zone = Data.ZoneOfArea(area)
+    local enemy = C.enemyCities and C.enemyCities[faction] or {}
+    if enemy[zone] or (C.starterZones and C.starterZones[zone]) then return nil end
+    return zone, area
+end
+
+local function addMob(cat, n)
+    local C, N = ns.ZoneContent or {}, Data.N
+    local lo, hi = N.minLevel(n) or 0, N.maxLevel(n) or 0
+    if lo <= 0 or hi > 63 or (N.npcFlags(n) or 0) ~= 0 then return end
+    local f = N.factionID(n) or 0
+    if (C.critterFactions and C.critterFactions[f]) or ns.Zones.IsHelperName(N.name(n)) then return end
+    if not ns.Zones.Hostile(Data.factionTemplate[f]) then return end
+    hi = math.max(hi, lo)
+    local rank = N.rank(n) or 0
+    for area, pts in pairs(N.spawns(n) or {}) do
+        local z = cat.zones[Data.ZoneOfArea(area)]
+        if z and #pts > 0 then
+            local bucket = (rank == 1 or rank == 2) and z.elite or z.hist
+            local share = #pts / (hi - lo + 1)
+            for l = lo, hi do bucket[l] = (bucket[l] or 0) + share end
+            z.npcs[n] = true
+        end
+    end
+end
+
+local function newZone(cat, zone)
+    local z = cat.zones[zone]
+    if not z then
+        z = { quests = {}, hist = {}, elite = {}, npcs = {}, anyRace = 0, forever = 0,
+            continent = (ns.ZoneContent and ns.ZoneContent.continent or {})[zone] }
+        cat.zones[zone] = z
+    end
+    return z
+end
+
+local function catalogInfo(q, zone, area)
+    local Q = Data.Q
+    local qLevel = Q.questLevel(q) or 0
+    if qLevel <= 0 then qLevel = math.max(Q.requiredLevel(q) or 1, 1) end
+    local _, elite, dungeon = Data.Objectives(q, qLevel, 1)
+    local C = ns.ZoneContent or {}
+    local xp, src = Data.QuestXP(q, 1)
+    return { id = q, zone = zone, level = qLevel, req = math.max(Q.requiredLevel(q) or 1, 1),
+        xp = xp, xpSrc = src, far = farDelivery(q), forever = q >= 90000,
+        unknownWork = q >= 90000 and noObjectives(q),
+        anyRace = q >= 90000 and (Q.requiredRaces(q) or 0) == 0,
+        repeatFlag = Util.HasFlag(Q.specialFlags(q) or 0, 1), -- só informativo (emenda da R4)
+        solo = not (elite or dungeon or (C.instances and C.instances[area]) or Data.dungeons[area]) }
+end
+
+-- R6: monta Data.zoneCatalog em coroutine (cede a cada 400 entidades) e avisa ZONE_CATALOG.
+function Data.BuildZoneCatalog()
+    if Data.zoneCatalog or Data.buildingCatalog or not Data.Q then return end
+    Data.buildingCatalog = true
+    local faction = _G.UnitFactionGroup and _G.UnitFactionGroup("player") or "Horde"
+    local cat = { zones = {}, info = {}, children = {} }
+    local co = coroutine.create(function()
+        for i, q in ipairs(Data.Q.GetAllIds()) do
+            local zone, area = catalogQuest(q, faction)
+            if zone then
+                local info = catalogInfo(q, zone, area)
+                cat.info[q] = info
+                local z = newZone(cat, zone)
+                z.quests[#z.quests + 1] = q
+                if info.forever then z.forever = z.forever + 1 end
+                if info.anyRace then z.anyRace = z.anyRace + 1 end
+            end
+            if i % 400 == 0 then coroutine.yield() end
+        end
+        for q in pairs(cat.info) do
+            for _, p in ipairs(Data.Prerequisites(q)) do
+                cat.children[p] = cat.children[p] or {}
+                table.insert(cat.children[p], q)
+            end
+        end
+        -- Zonas de grind: as do mapa de continentes, menos zona inicial de outra raça e capital
+        -- inimiga (R8 vale também para o grind: os guardas não são mob para farmar).
+        local C = ns.ZoneContent or {}
+        local enemy = C.enemyCities and C.enemyCities[faction] or {}
+        for zone in pairs(C.continent or {}) do
+            if not enemy[zone] and not (C.starterZones and C.starterZones[zone]) then newZone(cat, zone) end
+        end
+        for i, n in ipairs(Data.N.GetAllIds()) do
+            addMob(cat, n)
+            if i % 400 == 0 then coroutine.yield() end
+        end
+    end)
+    local f = CreateFrame("Frame")
+    f:SetScript("OnUpdate", function(self)
+        local ok, err = coroutine.resume(co)
+        if not ok then
+            ns.FP.Print("erro no catálogo de zonas:", err)
+            self:SetScript("OnUpdate", nil); Data.buildingCatalog = false
+            return
+        end
+        if coroutine.status(co) == "dead" then
+            self:SetScript("OnUpdate", nil)
+            Data.zoneCatalog, Data.buildingCatalog = cat, false
+            ns.FP.Debug("catálogo de zonas pronto")
+            ns.FP.Fire("ZONE_CATALOG")
+        end
+    end)
 end
 
 return Data
