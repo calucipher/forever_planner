@@ -13,15 +13,35 @@ Pensado para Warlock Undead, mas funciona pra qualquer classe e raça.
 
 ## Instalação
 
-1. Instale o **QuestieDB** (versão Forever) pelo CurseForge. Ele é obrigatório, porque traz a base de quests e NPCs.
-2. Baixe o `ForeverPlanner-<versão>.zip` da última versão em [Releases](https://github.com/calucipher/forever_planner/releases/latest).
-3. Extraia o zip na pasta `Interface/AddOns/` do Forever (por exemplo, `C:\World of Warcraft\_forever_\Interface\AddOns\`). O resultado deve ser `Interface/AddOns/ForeverPlanner/ForeverPlanner.toc`.
-4. *(Opcional)* Instale o TomTom (versão Forever).
-5. Abra o jogo e digite `/fp`.
+Antes de tudo, instale o **QuestieDB** (versão Forever) pelo CurseForge. Ele é obrigatório, porque traz a base de quests e NPCs. O TomTom (versão Forever) é opcional.
+
+### Pelo instalador (Windows)
+
+Abra o **PowerShell** (menu Iniciar → digite `PowerShell`) e cole:
+
+```powershell
+irm https://raw.githubusercontent.com/calucipher/forever_planner/main/install.ps1 | iex
+```
+
+O instalador acha a pasta do Forever, confere a versão instalada com a mais nova de [Releases](https://github.com/calucipher/forever_planner/releases/latest) e só baixa e instala se houver versão nova. **Para atualizar, rode o mesmo comando.** Ele troca a pasta `ForeverPlanner` inteira, então arquivo que saiu do addon também sai. Outros addons e as suas configurações (pasta `WTF/`) não são tocados.
+
+Se o WoW estiver numa pasta diferente, ou se preferir ler o script antes de rodar, baixe o [`install.ps1`](https://github.com/calucipher/forever_planner/blob/main/install.ps1) e rode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -WowPath "E:\World of Warcraft"
+```
+
+Outras opções: `-Zip <arquivo>` instala um zip já baixado, sem internet, e `-Force` reinstala a mesma versão.
+
+### À mão
+
+1. Baixe o `ForeverPlanner-<versão>.zip` da última versão em [Releases](https://github.com/calucipher/forever_planner/releases/latest).
+2. Extraia o zip na pasta `Interface/AddOns/` do Forever (por exemplo, `C:\World of Warcraft\_forever_\Interface\AddOns\`). O resultado deve ser `Interface/AddOns/ForeverPlanner/ForeverPlanner.toc`.
+3. Abra o jogo e digite `/fp`.
 
 > O botão **Code → Download ZIP** desta página cria a pasta `forever_planner-main`, sem a subpasta. O jogo só carrega o addon se a pasta se chamar `ForeverPlanner`. Use o zip de Releases.
 
-Para atualizar, apague a pasta `ForeverPlanner` antiga e extraia o zip novo. As suas configurações ficam em `WTF/` e não se perdem.
+Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip novo. As suas configurações ficam em `WTF/` e não se perdem.
 
 ## Uso
 
