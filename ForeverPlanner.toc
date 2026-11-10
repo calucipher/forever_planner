@@ -1,0 +1,43 @@
+## Interface: 16001
+## Title: |cFF9482C9Forever|r Planner
+## Notes: Planejador de quests por zona para leveling no WoW: Forever (guia por hub, XP/hora com XP de mob), com GPS, macros e builds.
+## Notes-ptBR: Planejador de quests por zona para leveling no WoW: Forever (guia por hub, XP/hora com XP de mob), com GPS, macros e builds.
+## Author: Calcifer Fallingstar
+## Version: 0.7.0
+## Category: Quests
+## Dependencies: QuestieDB
+## OptionalDeps: TomTom
+## SavedVariablesPerCharacter: ForeverPlannerDB
+## IconTexture: Interface\Icons\Spell_Shadow_SummonFelHunter
+## AddonCompartmentFunc: ForeverPlanner_OnAddonCompartmentClick
+## X-License: GPL-3.0 (usa dados da QuestieDB, GPL-3.0)
+## X-Website: https://github.com/calucipher/forever_planner
+
+Util.lua
+Core.lua
+Weights.lua
+Milestones.lua
+Leveling.lua
+Scoring.lua
+Data.lua
+Planner.lua
+Gps.lua
+Guide.lua
+ClassGuide.lua
+Auto.lua
+Group.lua
+Content\Macros.lua
+Content\Builds.lua
+Content\Classes.lua
+Content\Spells.lua
+Content\Transports.lua
+Content\QuestFixes.lua
+UI\Theme.lua
+UI\MainFrame.lua
+UI\GuideTab.lua
+UI\QuestsTab.lua
+UI\MacrosTab.lua
+UI\BuildsTab.lua
+UI\MinimapButton.lua
+UI\QuickMenu.lua
+Debug.lua
