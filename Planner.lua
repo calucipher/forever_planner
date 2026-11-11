@@ -157,7 +157,8 @@ function Planner.Evaluate(q, level, player)
     for _, o in ipairs(objectives) do
         if state ~= "entregar" and not o.done then
             for _, p in ipairs(o.points) do objPts[#objPts + 1] = p end
-            work = work + o.kills * perKill + o.objects * ns.Leveling.OBJECT_SECONDS
+            work = work + o.kills * perKill * ns.Leveling.KillFactor(o.avgLevel, level) -- spec 030, R5
+                + o.objects * ns.Leveling.OBJECT_SECONDS
             mobXP = mobXP + o.kills * o.mobXP
         end
     end
@@ -189,9 +190,13 @@ function Planner.Rank(mapID)
     for _, q in ipairs(D.QuestsForMap(mapID)) do
         if D.IsEligible(q, level) and D.IsRelevant(q, level)
             and not ns.Leveling.TooHigh(D.Q.questLevel(q), level, Planner.State(q)) then -- spec 025, R4
-            local ok, row = pcall(Planner.Evaluate, q, level, player)
-            if ok and row then rows[#rows + 1] = row
-            else
+            local ok, row = pcall(function()
+                -- spec 030, R4: dentro do pcall, erro numa quest não derruba a lista (constituição 7)
+                if ns.Leveling.ObjectivesTooHigh(D.Objectives(q, level), level, Planner.State(q)) then return false end
+                return Planner.Evaluate(q, level, player)
+            end)
+            if ok and row then rows[#rows + 1] = row -- row false = mobs altos: fora, sem ser falha
+            elseif not ok then
                 failures.count = failures.count + 1
                 failures.first = failures.first or ("quest " .. q .. ": " .. tostring(row))
             end

@@ -626,7 +626,9 @@ function Guide.ZoneQuestEntry(info, L, p, unlock)
     local q = info.id
     local kills, objects, mobXP = 0, 0, 0
     for _, o in ipairs(D.Objectives(q, L, p.factor)) do
-        kills, objects, mobXP = kills + o.kills, objects + o.objects, mobXP + o.kills * o.mobXP
+        -- spec 030, R5: kill de mob alto conta como mais tempo (o XP é o da kill mesmo)
+        kills = kills + o.kills * ns.Leveling.KillFactor(o.avgLevel, L)
+        objects, mobXP = objects + o.objects, mobXP + o.kills * o.mobXP
     end
     local seconds, used = Z.QuestSeconds({ kills = kills, objects = objects, far = info.far,
         unknownWork = info.unknownWork }, p)
@@ -641,7 +643,8 @@ local function zoneOffer(cat, zone, L, p)
     local entries = {}
     for _, q in ipairs(cat.zones[zone].quests) do
         local info = cat.info[q]
-        if info.solo and info.level <= L + 3 and D.IsEligible(q, L) then
+        if info.solo and info.level <= L + 3 and D.IsEligible(q, L)
+            and not ns.Leveling.ObjectivesTooHigh(D.Objectives(q, L, p.factor), L) then -- spec 030, R4
             local unlock = Z.ChainAhead(q, cat, zone, L, doneLookup)
             local gray = L - info.level >= 10
             if D.IsRelevant(q, L) or (gray and unlock > 0 and D.IsRelevant(q, info.level)) then

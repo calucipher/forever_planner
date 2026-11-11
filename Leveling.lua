@@ -221,8 +221,31 @@ local function pending(q)
     return out
 end
 
+-- Spec 030, R5: mob acima do jogador demora mais (+10% por nível, como o grind da spec 029).
+function Leveling.KillFactor(avgLevel, playerLevel)
+    if not (avgLevel and playerLevel) then return 1 end
+    return 1 + 0.1 * max(0, avgLevel - playerLevel)
+end
+
+-- Spec 030, R2: objetivo com mob médio mais de 1,5 nível acima do jogador.
+Leveling.MAX_MOB_ABOVE = 1.5
+function Leveling.MobsTooHigh(avgLevel, playerLevel, state)
+    return state ~= "entregar" and avgLevel ~= nil and playerLevel ~= nil and playerLevel ~= false
+        and avgLevel > playerLevel + Leveling.MAX_MOB_ABOVE
+end
+
+-- Algum objetivo pendente com mobs altos demais (R2)? objectives = saída de Data.Objectives.
+function Leveling.ObjectivesTooHigh(objectives, playerLevel, state)
+    if state == "entregar" then return false end
+    for _, o in ipairs(objectives or {}) do
+        if not o.done and Leveling.MobsTooHigh(o.avgLevel, playerLevel, state) then return true end
+    end
+    return false
+end
+
 local function workSeconds(o, p)
-    return (o.kills or 0) * (p.ttk + (p.downtime or 0)) + (o.objects or 0) * Leveling.OBJECT_SECONDS
+    local factor = p.playerLevel and Leveling.KillFactor(o.avgLevel, p.playerLevel) or 1
+    return (o.kills or 0) * (p.ttk + (p.downtime or 0)) * factor + (o.objects or 0) * Leveling.OBJECT_SECONDS
 end
 
 Leveling.MAX_LEVELS_ABOVE = 4 -- spec 025: quest "vermelha" demais (também o filtro de quest nova, Data.lua)
@@ -237,6 +260,11 @@ local function asideReason(q, p)
     if q.forceAside then return q.forceAside end -- ex.: satélite com desvio grande (spec 008)
     -- Spec 025, R1: quest do log alta demais sai do circuito; a entrega pronta fica.
     if Leveling.TooHigh(q.qLevel, p.playerLevel, q.state) then return "nível alto" end
+    local high -- spec 030, R3: o objetivo mais alto decide; backAt = nível em que volta
+    for _, o in ipairs(pending(q)) do
+        if Leveling.MobsTooHigh(o.avgLevel, p.playerLevel, q.state) then high = max(high or 0, o.avgLevel) end
+    end
+    if high then return "mobs altos", math.ceil(high - Leveling.MAX_MOB_ABOVE) end
     if q.elite then return "elite" end
     if q.dungeon then return "dungeon" end
     if q.state == "pegar" and #(q.starters or {}) == 0 then return "sem coordenada" end
@@ -307,6 +335,7 @@ function Leveling.MergeObjectives(quests)
                 merged[#merged + 1] = m
             end
             m.estimated = m.estimated or o.estimated or nil
+            if o.avgLevel then m.avgLevel = max(m.avgLevel or o.avgLevel, o.avgLevel) end -- spec 030, R5
             for _, k in ipairs(o.after or {}) do m.after[#m.after + 1] = k end
             m.kills = max(m.kills, o.kills or 0)
             m.objects = max(m.objects, o.objects or 0)
@@ -379,8 +408,8 @@ local function questOfEntry(e) return e.quest end
 function Leveling.BuildCircuit(quests, start, p, dist)
     local aside, candidates, out = {}, {}, {}
     for _, q in ipairs(quests) do
-        local why = asideReason(q, p)
-        if why then aside[#aside + 1] = { id = q.id, reason = why }; out[q.id] = true
+        local why, backAt = asideReason(q, p)
+        if why then aside[#aside + 1] = { id = q.id, reason = why, backAt = backAt }; out[q.id] = true
         else candidates[#candidates + 1] = q end
     end
     candidates = dropDependents(candidates, itself, out, aside)

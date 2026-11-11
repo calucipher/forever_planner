@@ -429,9 +429,43 @@ local function spawnCount(npc)
     return n
 end
 
+-- Spec 030, R1: nível médio dos mobs de um objetivo, meio da faixa com peso pelos spawns na
+-- zona da quest (sem spawn na zona, o total). Só conta mob: sem npcFlags e hostil (emenda R1).
+local function isMob(npc)
+    if (Data.N.npcFlags(npc) or 0) ~= 0 then return false end
+    local f = Data.N.factionID(npc) or 0
+    local notMob = ns.ZoneContent and ns.ZoneContent.notMobFactions or {}
+    if notMob[f] then return false end -- emenda da 2ª rodada
+    return ns.Zones.Hostile((Data.factionTemplate or {})[f])
+end
+local function spawnsInZone(npc, zone)
+    local n = 0
+    for area, list in pairs(Data.N.spawns(npc) or {}) do
+        if Data.ZoneOfArea(area) == zone then n = n + #list end
+    end
+    return n
+end
+local function avgLevelOf(npcs, qLevel, zone)
+    local mobs, inZone = {}, 0
+    for _, npc in ipairs(npcs) do
+        if isMob(npc) then
+            local z = zone and spawnsInZone(npc, zone) or 0
+            mobs[#mobs + 1] = { npc = npc, z = z }
+            inZone = inZone + z
+        end
+    end
+    local sum, weight = 0, 0
+    for _, m in ipairs(mobs) do
+        local lo, hi = npcLevels(m.npc, qLevel)
+        local w = inZone > 0 and m.z or math.max(spawnCount(m.npc), 1)
+        sum, weight = sum + w * (lo + hi) / 2, weight + w
+    end
+    return weight > 0 and sum / weight or nil
+end
+
 -- Objetivo "pegar um item que dropa": de quem dropa, pontos, níveis, elite/dungeon e taxa.
 -- Usado na coleta (objetivo [3]) e no item exigido antes do objetivo (R30).
-local function dropObjective(item, qLevel)
+local function dropObjective(item, qLevel, zone)
     local npcs, objs = Data.I.npcDrops(item) or {}, Data.I.objectDrops(item) or {}
     if #npcs == 0 and #objs == 0 then return nil end
     local pts, levels, allElite, est, dungeon = {}, {}, #npcs > 0, false, false
@@ -452,7 +486,10 @@ local function dropObjective(item, qLevel)
     local named = #npcs == 1 and #objs == 0 and spawnCount(npcs[1]) <= 2
     return { key = key, kind = #npcs > 0 and "loot" or "object", names = { Data.I.name(item) },
         label = Data.I.name(item), points = pts, levels = levels, estimated = est,
-        rate = named and 1 or LOOT_RATE, item = item }, allElite, dungeon
+        rate = named and 1 or LOOT_RATE, item = item,
+        -- emenda R1: item que também cai de objeto dá para cumprir sem matar
+        avgLevel = (#npcs > 0 and #objs == 0) and avgLevelOf(npcs, qLevel, zone) or nil },
+        allElite, dungeon
 end
 
 local function itemCount(id)
@@ -469,6 +506,7 @@ local function staticObjectives(q)
     local qLevel = Q.questLevel(q) or 1
     local list, elite, dungeon = {}, false, false
     if (Q.zoneOrSort(q) or 0) > 0 and Data.dungeons[Q.zoneOrSort(q)] then dungeon = true end
+    local zone = (Q.zoneOrSort(q) or 0) > 0 and Data.ZoneOfArea(Q.zoneOrSort(q)) or nil -- spec 030
 
     for _, e in ipairs(o[1] or {}) do
         local id = e[1]
@@ -476,7 +514,8 @@ local function staticObjectives(q)
         if isEliteNpc(id) then elite = true end
         if inDungeon(Data.N.spawns(id)) then dungeon = true end
         list[#list + 1] = { key = "npc:" .. id, kind = "kill", names = { Data.N.name(id) },
-            label = Data.N.name(id), points = entityPoints("npc", id), levels = { { lo, hi } }, estimated = est }
+            label = Data.N.name(id), points = entityPoints("npc", id), levels = { { lo, hi } }, estimated = est,
+            avgLevel = avgLevelOf({ id }, qLevel, zone) }
     end
     for _, e in ipairs(o[2] or {}) do
         local id = e[1]
@@ -485,7 +524,7 @@ local function staticObjectives(q)
             label = Data.O.name(id), points = entityPoints("object", id), levels = {} }
     end
     for _, e in ipairs(o[3] or {}) do
-        local ob, allElite, inDg = dropObjective(e[1], qLevel)
+        local ob, allElite, inDg = dropObjective(e[1], qLevel, zone)
         if ob then
             list[#list + 1] = ob
             elite, dungeon = elite or allElite, dungeon or inDg
@@ -504,7 +543,8 @@ local function staticObjectives(q)
             if isEliteNpc(npc) then elite = true end
         end
         list[#list + 1] = { key = "kc:" .. tostring(e[2]), kind = "kill", names = { e[3], Data.N.name(e[2] or 0) },
-            label = e[3] or Data.N.name(e[2] or 0), points = pts, levels = levels }
+            label = e[3] or Data.N.name(e[2] or 0), points = pts, levels = levels,
+            avgLevel = #npcs > 0 and avgLevelOf(npcs, qLevel, zone) or nil }
     end
 
     -- Contagem pelo texto da base: números na ordem dos objetivos, se baterem; senão, padrão.
@@ -524,7 +564,7 @@ local function staticObjectives(q)
     -- R30/R31: item exigido que dropa no mundo vira objetivo anterior aos demais.
     local sources = {}
     for _, item in ipairs(Q.requiredSourceItems(q) or {}) do
-        local ob, allElite, inDg = dropObjective(item, qLevel)
+        local ob, allElite, inDg = dropObjective(item, qLevel, zone)
         if ob then
             ob.source, ob.textCount = true, 1
             sources[#sources + 1] = ob
@@ -585,7 +625,7 @@ function Data.Objectives(q, level, factor)
         for _, k in ipairs(ob.after or {}) do if not doneKey[k] then after[#after + 1] = k end end
         out[#out + 1] = { key = ob.key, kind = ob.kind, label = ob.label, points = ob.points,
             kills = done and 0 or kills, objects = done and 0 or objects, mobXP = mobXP, done = done,
-            estimated = ob.estimated, after = after }
+            estimated = ob.estimated, after = after, avgLevel = ob.avgLevel }
     end
     return out, st.elite, st.dungeon
 end

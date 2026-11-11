@@ -75,6 +75,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 - **Botão do minimapa**: clique abre/fecha o painel, clique direito segue o melhor hub, arraste para mover. O addon também aparece no menu de addons do minimapa.
 - Na aba **Guia**, clique num hub para ver o circuito e em *Seguir este hub*. O GPS aponta a próxima parada e avança sozinho quando você pega, cumpre ou entrega.
 - **Sugestão de zona**: no topo da aba Guia, quanto a zona atual rende e se vale ficar, ir para outra zona ou fazer grind (e onde). O chat avisa uma vez quando a zona acabou. É estimativa: conta a viagem e as cadeias, e fica melhor depois da calibração.
+- Quest cujos mobs do objetivo estão, em média, mais de 1,5 nível acima de você fica fora do circuito como **mobs altos, volta no N**. Ela entra sozinha quando você chega no nível N.
 - Depois de 5 mortes, o tempo por morte e o fator de XP passam a ser os medidos no jogo (`/fp calib`).
 - Clique numa quest para o GPS segui-la.
 - Clique direito na seta para parar o GPS.

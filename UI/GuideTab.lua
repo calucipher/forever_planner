@@ -4,7 +4,7 @@ local Theme, Util = ns.Theme, ns.Util
 
 local ROW_H, VISIBLE = 24, 6
 local columns = { { 6, 250, "Hub" }, { 262, 50, "Quests" }, { 316, 70, "XP" }, { 390, 50, "Min" }, { 444, 90, "XP/h" } }
-local REASONS = { elite = "elite", dungeon = "dungeon", ["sem coordenada"] = "sem coordenada",
+local REASONS = { elite = "elite", dungeon = "dungeon", ["mobs altos"] = "mobs altos", ["sem coordenada"] = "sem coordenada",
     ["abaixo do limiar"] = "rende pouco", ["log cheio"] = "log cheio", desvio = "desvio grande", ["nível alto"] = "nível alto" }
 
 local function build(panel)
@@ -129,8 +129,9 @@ local function build(panel)
             lines[#lines + 1] = " "
             lines[#lines + 1] = "|cFFFF6666Fora do circuito|r"
             for _, a in ipairs(c.aside) do
-                lines[#lines + 1] = string.format("  · %s  |cFF888888(%s)|r", names[a.id] or tostring(a.id),
-                    REASONS[a.reason] or a.reason)
+                local why = REASONS[a.reason] or a.reason
+                if a.backAt then why = why .. ", volta no " .. a.backAt end -- spec 030, R3
+                lines[#lines + 1] = string.format("  · %s  |cFF888888(%s)|r", names[a.id] or tostring(a.id), why)
             end
         end
         return table.concat(lines, "\n")

@@ -43,3 +43,8 @@ ZoneContent.helperNames = { "Invasion", "Necropolis", "[Ff]inder", "Proxy", "Rel
 
 -- Facções de bicho (Prey e Ambient): não contam como mob.
 ZoneContent.critterFactions = { [31] = true, [188] = true }
+
+-- Spec 030 (emenda R1): NPC sem facção na base (0) e da facção 35 (amigo de todos) não contam no
+-- nível médio do objetivo. Casos do Forever, 11/11/2026: 99141 Deathguard Kristof (0, nível 55),
+-- 99134 Deathguards (0), 99411 Kyle the Frenzied (35, nível 12).
+ZoneContent.notMobFactions = { [0] = true, [35] = true }
