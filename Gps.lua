@@ -143,6 +143,7 @@ local function toWorld(mapID, x, y)
     local wx, wy = pos:GetXY()
     return cont, wx, wy
 end
+Gps.ToWorld = toWorld -- spec 041: entradas de masmorra e meeting stones
 
 local function caveList()
     if not seedCache and C_Map.GetWorldPosFromMapPos and CreateVector2D then

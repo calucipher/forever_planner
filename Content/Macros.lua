@@ -2,6 +2,7 @@
 -- hora de criar. Nomes vêm do client pelo ID do feitiço (idioma do client); só entra o que o
 -- personagem conhece; ao aprender um feitiço, as macros FP já criadas são reescritas.
 -- Feitas para repeat (Razer Naga): alvo automático só em combate, prioridades e castsequence.
+-- A FP Burst saiu na terceira emenda de 15/11/2026 da spec 003; quem já a criou continua com ela (R9).
 -- IDs do Classic (rank 1). ID, nome `en` e `level` conferidos nas DB2 do cliente do Forever
 -- (build 1.60.1.70862, 07/11/2026, tools/check_content.py). No jogo: /fp macros.
 local _, ns = ...
@@ -68,18 +69,19 @@ Macros.categories = { "Leveling", "Avançadas" }
 --   { "mofocus", chave }     mouseover; foco; alvo
 --   { "self", chave }        /cast [@player] Nome
 --   { "seq", {itens} }       /castsequence reset=target/combat; item = chave, {alternativas} ou "null"
---   { "wandOr", chave }      /cast [equipped:Varinhas] !Shoot; Nome (sem varinha, o feitiço)
 -- requires = feitiço sem o qual a macro fica indisponível. noRepeat = não usar no repeat.
 local AUTO = { "auto" }
 local TIP = { "tip" }
 
 Macros.classes = {
     WARLOCK = {
-        -- Emenda de 08/11/2026 (spec 003): poupa mana. "null" segura a sequência (não recasta os DoTs).
+        -- Terceira emenda de 15/11/2026 (spec 003, R2 e R10): o ritmo tradicional. Sem varinha e sem
+        -- "null": depois dos 2 Shadow Bolts a sequência recomeça (o Agony ainda pode estar no alvo). A varinha fica
+        -- na FP Varinha. A FP Burst saiu: ficou igual a esta.
         { name = "FP Rotacao", cat = "Leveling", requires = "shadowBolt",
           lines = { TIP, AUTO, { "raw", "/petattack" },
-              { "seq", { "corruption", "agony", "siphon", "shadowBolt", "null" } }, { "wandOr", "shadowBolt" } },
-          desc = "Spam que poupa mana: pet ataca, DoTs, 1 Shadow Bolt e depois a varinha (sem varinha, Shadow Bolt)." },
+              { "seq", { "agony", "corruption", "immolate", "siphon", "shadowBolt", "shadowBolt" } } },
+          desc = "Spam: pet ataca, Agony, Corruption, Immolate, Siphon Life, 2 Shadow Bolts e recomeça." },
         { name = "FP Tap", cat = "Leveling", requires = "lifeTap", noRepeat = true,
           lines = { { "tip", "lifeTap" }, { "cast", "lifeTap" } },
           desc = "Life Tap: vida vira mana. Use com vida alta; recupere a vida com Drain Life." },
@@ -92,13 +94,9 @@ Macros.classes = {
         { name = "FP Dreno", cat = "Leveling", requires = "drainLife", noRepeat = true,
           lines = { { "tip", "drainLife" }, AUTO, { "mo", "drainLife" } },
           desc = "Drain Life no mouseover ou no alvo (drain tanking). Canalizado: aperte uma vez." },
-        { name = "FP Varinha", cat = "Leveling", requires = "shoot",
+        { name = "FP Varinha", cat = "Leveling", requires = "shoot", noRepeat = true,
           lines = { { "tip", "shoot" }, AUTO, { "raw", "/petattack" }, { "bang", "shoot" } },
           desc = "Pet ataca e liga a varinha sem desligar se apertar de novo." },
-        { name = "FP Burst", cat = "Avançadas", requires = "shadowBolt",
-          lines = { TIP, AUTO, { "raw", "/petattack" },
-              { "seq", { "immolate", "corruption", "agony", "siphon", "shadowBolt", "shadowBolt" } } },
-          desc = "Mob difícil ou elite: Immolate, DoTs e 2 Shadow Bolts (gasta muita mana)." },
         { name = "FP Fear", cat = "Avançadas", requires = "fear", noRepeat = true,
           lines = { { "tip", "fear" }, { "mofocus", "fear" } },
           desc = "Fear no mouseover, no foco ou no alvo: tira o segundo mob da luta." },
@@ -124,7 +122,7 @@ Macros.classes = {
           lines = { TIP, AUTO, { "seq", { { "frostbolt", "fireball" }, { "frostbolt", "fireball" },
               { "frostbolt", "fireball" }, "fireBlast" } } },
           desc = "Spam: 3 Frostbolts (ou Fireball no começo) e Fire Blast para finalizar." },
-        { name = "FP Varinha", cat = "Leveling", requires = "shoot",
+        { name = "FP Varinha", cat = "Leveling", requires = "shoot", noRepeat = true,
           lines = { { "tip", "shoot" }, AUTO, { "bang", "shoot" } },
           desc = "Liga a varinha sem desligar se apertar de novo (sem mana)." },
         { name = "FP AoE", cat = "Avançadas", requires = "arcaneExplosion",
@@ -204,13 +202,6 @@ local LINE = {
         if seq[#seq] == "null" and #seq == 1 then return nil end
         return #seq > 0 and ("/castsequence reset=target/combat " .. table.concat(seq, ", ")) or nil
     end,
-    -- R10 (emenda de 08/11/2026): varinha se houver uma equipada; senão, o feitiço.
-    wandOr = function(l, names)
-        local spell = names[l[2]]
-        if not names.shoot then return spell and ("/cast " .. spell) end
-        local wand = "/cast [equipped:" .. (names["@wands"] or "Wands") .. "] !" .. names.shoot
-        return spell and (wand .. "; " .. spell) or wand
-    end,
 }
 
 function Macros.Compose(m, names)
@@ -259,18 +250,9 @@ function Macros.Resolve(key)
     return nil
 end
 
--- Nome do tipo de item "varinha" no idioma do client (classe 2, subclasse 19), para [equipped:].
-local function wandsName()
-    local C = _G.C_Item
-    local name = C and C.GetItemSubClassInfo and C.GetItemSubClassInfo(2, 19)
-    if not name and _G.GetItemSubClassInfo then name = _G.GetItemSubClassInfo(2, 19) end
-    return name
-end
-
 function Macros.KnownNames()
     local names = {}
     for key in pairs(Macros.spells) do names[key] = Macros.Resolve(key) end
-    names["@wands"] = wandsName()
     return names
 end
 

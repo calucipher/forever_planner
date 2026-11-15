@@ -130,6 +130,14 @@ Commands.list = {
         tip = "Entradas de caverna que o jogo gravou (spec 038)", run = listCaves },
     { id = "entradas limpar", label = "Apagar entradas", section = "Rota", kind = "acao",
         tip = "Apaga as entradas de caverna aprendidas", run = clearCaves },
+    { id = "masmorras", label = "Masmorras para você", section = "Rota", kind = "lista",
+        tip = "Masmorras do seu nível: entrada, meeting stone e attune (spec 041)",
+        run = function() ns.DungeonGuide.PrintList(false) end },
+    { id = "masmorras zona", label = "Masmorras do mapa", section = "Rota", kind = "lista",
+        tip = "Todas as masmorras com entrada ou pedra no mapa da zona atual",
+        run = function() ns.DungeonGuide.PrintList(true) end },
+    { id = "masmorras limpar", label = "Apagar entradas de masmorra", section = "Rota", kind = "acao",
+        tip = "Apaga as entradas de masmorra que o jogo gravou", run = function() ns.DungeonGuide.ClearLearned() end },
     -- Personagem
     { id = "bolsa", label = "Seguir bolsa", section = "Personagem", kind = "acao",
         tip = "Segue a melhor quest que dá bolsa (zona atual primeiro)", run = function() ns.Guide.FollowBag() end },
@@ -179,6 +187,14 @@ Commands.list = {
     { id = "minimapa", label = "Botão no minimapa", section = "Interface", kind = "liga", alias = { "minimap" },
         tip = "Mostra ou esconde o botão no minimapa", run = function() ns.MinimapButton.Toggle() end,
         state = function() return not (db().minimap and db().minimap.hide) end },
+    { id = "masmorras pinos", label = "Masmorras no mapa", section = "Interface", kind = "liga",
+        tip = "Mostra ou esconde os pinos de entrada de masmorra e meeting stone no mapa-múndi (spec 041)",
+        run = function()
+            local d = ns.DungeonGuide.db()
+            d.pins = d.pins == false
+            ns.FP.Fire("DUNGEONS")
+        end,
+        state = function() return ns.DungeonGuide.db().pins ~= false end },
     -- Registro
     { id = "diario", label = "Diário", section = "Registro", kind = "liga", arg = "[on|off]",
         tip = "Diário do que você faz no jogo (spec 036). Sem argumento no comando: o resumo",

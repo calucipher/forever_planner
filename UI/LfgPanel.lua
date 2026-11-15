@@ -81,6 +81,7 @@ local function activityInfo(id)
         actCache[id] = {
             minLevel = a.minLevel, minLevelSuggestion = a.minLevelSuggestion, maxLevelSuggestion = a.maxLevelSuggestion,
             maxNumPlayers = a.maxNumPlayers, orderIndex = a.orderIndex, shortName = a.shortName ~= "" and a.shortName or a.fullName,
+            fullName = a.fullName, -- spec 041, R10: casa com a entrada da masmorra
         }
     end
     return actCache[id]
@@ -148,11 +149,28 @@ local function buildRow(parent, i)
     Theme.Backdrop(r, i % 2 == 0 and Theme.c.rowAlt or Theme.c.row)
     r:SetHeight(ROW_H - 2)
     r.top = Theme.Text(r, 11, Theme.c.text)
-    r.top:SetPoint("TOPLEFT", 6, -4); r.top:SetPoint("RIGHT", -70, 0)
+    r.top:SetPoint("TOPLEFT", 6, -4); r.top:SetPoint("RIGHT", -96, 0)
     r.sub = Theme.Text(r, 10, Theme.c.muted)
-    r.sub:SetPoint("TOPLEFT", r.top, "BOTTOMLEFT", 0, -3); r.sub:SetPoint("RIGHT", -70, 0)
+    r.sub:SetPoint("TOPLEFT", r.top, "BOTTOMLEFT", 0, -3); r.sub:SetPoint("RIGHT", -96, 0)
     r.btn = Theme.Button(r, "Chamar", 60, 22, function() if r.row then callLeader(r.row) end end, "primary")
     r.btn:SetPoint("RIGHT", -5, 0)
+    -- Spec 041, R10: seta na entrada da masmorra da atividade.
+    r.go = Theme.Button(r, ">", 22, 22, function() if r.dungeon then ns.DungeonGuide.GoEntrance(r.dungeon) end end)
+    r.go:SetPoint("RIGHT", r.btn, "LEFT", -4, 0)
+    r.go:HookScript("OnEnter", function(self)
+        local d = r.dungeon
+        if not d then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Entrada: " .. d.name, 1, 1, 1)
+        GameTooltip:AddLine(ns.DungeonGuide.Where((ns.DungeonGuide.Nearest(d))), 0.8, 0.8, 0.8)
+        if d.stone then GameTooltip:AddLine("Meeting stone: " .. ns.DungeonGuide.Where(d.stone), 0.8, 0.8, 0.8) end
+        local at = ns.DungeonGuide.AttuneText(d)
+        if at then GameTooltip:AddLine(at, 1, 1, 1, true) end
+        GameTooltip:AddLine("Clique: seta na entrada", 0.6, 0.6, 0.7)
+        GameTooltip:Show()
+    end)
+    r.go:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    r.go:Hide()
     return r
 end
 
@@ -245,7 +263,14 @@ local function fill(f, list, L)
             local fit = a and Lfg.Fit(a, L)
             local color = fit == 0 and "|cFF73E659" or "|cFFEDEBF5"
             r.top:SetText(color .. ((a and a.shortName) or "?") .. "|r  " .. (solo and "sozinho" or ((row.numMembers or 0) .. size)))
-            r.sub:SetText((row.leaderName or "?") .. "  " .. rangeText(a) .. "  " .. statusText(row.key))
+            local d = a and ns.DungeonGuide.ForActivity(a.fullName or a.shortName)
+            local e = d and ns.DungeonGuide.Nearest(d)
+            local st = d and ns.DungeonGuide.AttuneState(d)
+            r.dungeon = e and d or nil
+            local where = (e and ("  · " .. ns.DungeonGuide.MapName(e.m)) or "") ..
+                ((st and st.next) and ("  |cFFFFD14DAttune: falta " .. st.next.title .. "|r") or "")
+            r.sub:SetText((row.leaderName or "?") .. "  " .. rangeText(a) .. "  " .. statusText(row.key) .. where)
+            if r.dungeon then r.go:Show() else r.go:Hide() end
             if Lfg.CanCall(row, L) then r.btn:Show() else r.btn:Hide() end
             r:ClearAllPoints(); r:SetPoint("TOPLEFT", 0, -y); r:SetPoint("RIGHT")
             r:Show()

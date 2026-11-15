@@ -8,6 +8,49 @@ local ROW_H = 18
 local function minutes(s) return math.max(1, math.floor((s or 0) / 60 + 0.5)) end
 local function xph(v) return Util.FormatInt(math.floor((v or 0) + 0.5)) end
 
+-- Spec 041, R7: masmorras para você e, abaixo, as outras do mapa atual.
+local function dungeonLines(out, title, empty)
+    local DG = ns.DungeonGuide
+    if not DG.List() then return end
+    local L = UnitLevel("player")
+    local function add(d)
+        local e, yd = DG.Nearest(d)
+        local far = yd and string.format(" · %s jd", Util.FormatInt(math.floor(yd + 0.5))) or ""
+        local tip = { d.name, DG.Where(e) .. (e and e.est and " (estimativa: " .. tostring(e.source) .. ")" or "") }
+        if e and e.learned then tip[#tip + 1] = "Posição gravada no jogo." end
+        out[#out + 1] = { text = string.format("  %s  %s  |cFF888888%s%s%s|r", d.name, DG.Range(d, L),
+            e and DG.MapName(e.m) or "entrada desconhecida", far, e and e.est and " (est.)" or ""),
+            action = function() DG.GoEntrance(d) end, tip = tip, hint = "Clique: seta na entrada" }
+        if d.stone then
+            out[#out + 1] = { text = "      |cFF888888meeting stone · " .. DG.Where(d.stone) .. "|r",
+                action = function() DG.GoStone(d) end, tip = { "Meeting stone: " .. d.name, DG.Where(d.stone),
+                    "No Forever a pedra não invoca o grupo: é o ponto de encontro." }, hint = "Clique: seta na pedra" }
+        end
+        local at = DG.AttuneText(d)
+        if at then
+            local st = DG.AttuneState(d)
+            local tip2 = { "Attune: " .. d.name, "Passo feito uma vez para a porta abrir (" .. tostring(d.attune.item or "chave") .. ")." }
+            if d.attune.optional then tip2[#tip2 + 1] = "Opcional: " .. d.attune.optional end
+            tip2[#tip2 + 1] = "Fonte: " .. tostring(d.attune.source)
+            out[#out + 1] = { text = "      " .. at, tip = tip2,
+                action = st.next and function() DG.GoAttune(d) end or nil, hint = "Clique: seta no próximo passo" }
+        end
+    end
+    title("Masmorras para você")
+    local mine, seen = DG.ForPlayer(), {}
+    for _, d in ipairs(mine) do seen[d] = true; add(d) end
+    if #mine == 0 then empty("nenhuma masmorra no seu nível (ou o LFG ainda não carregou)") end
+    local others = {}
+    for _, p in ipairs(DG.InMap(C_Map.GetBestMapForUnit("player"))) do
+        if not seen[p.d] then seen[p.d] = true; others[#others + 1] = p.d end
+    end
+    if #others > 0 then
+        out[#out + 1] = { text = " " }
+        title("Outras masmorras deste mapa")
+        for _, d in ipairs(others) do add(d) end
+    end
+end
+
 local function build(panel)
     local api, rows = {}, {}
 
@@ -121,6 +164,8 @@ local function build(panel)
                     c.n, c.backAt) } }
         end
         if #res.comeBack == 0 then empty("nada alto demais por perto") end
+        gap()
+        dungeonLines(out, title, empty)
         return out
     end
 
@@ -148,6 +193,7 @@ local function build(panel)
     panel:HookScript("OnShow", function() ns.LevelGuide.watching = true end)
     panel:HookScript("OnHide", function() ns.LevelGuide.watching = false end)
     ns.FP.On("LEVEL_GUIDE", function() if panel:IsVisible() then api.Refresh() end end)
+    ns.FP.On("DUNGEONS", function() if panel:IsVisible() then api.Refresh() end end)
 
     function api.Refresh()
         ns.LevelGuide.watching = panel:IsVisible()

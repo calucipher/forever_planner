@@ -103,7 +103,7 @@ Nada é raspado do Wowhead. Os termos do Wowhead proíbem coleta automatizada, m
 - Os **pesos de atributo são heurísticos**. Não existem pesos oficiais do Forever. Ajuste na aba Builds e calibre o TTK.
 - Os **nomes de API** são da família Mainline 12.1.5. Confira no client live se algum falhar.
 - Os **padrões de tooltip em pt-BR** são melhor esforço. Use `/fp stats` para conferir.
-- Nas **macros**, os IDs de feitiço são os do Classic. Se algum não resolver no Forever, a macro usa o nome em inglês (confira com `/fp macros`). Na FP Rotacao, o `null` que segura a sequência e a varinha logo depois do Shadow Bolt ainda precisam de teste no jogo.
+- Nas **macros**, os IDs de feitiço são os do Classic. Se algum não resolver no Forever, a macro usa o nome em inglês (confira com `/fp macros`). A FP Rotacao não usa a varinha: faz Agony, Corruption, Immolate, Siphon Life e 2 Shadow Bolts e recomeça. Para a varinha, use a FP Varinha.
 - O planejador não replica as blacklists internas do Questie. Ele exclui eventos sazonais, PvP, quests de profissão e de outras classes, e quests 5+ níveis acima do seu.
 - O **ouro** só entra na conta depois que você vê a recompensa (`goldToXP` padrão = 0).
 - A **taxa de drop** é fixa em 45% (a QuestieDB não traz a taxa). O **XP de mob** usa a fórmula do Classic até a calibração medir o do Forever.
