@@ -154,4 +154,90 @@ function Zones.Decide(cur, cands, grind, p)
     return { action = "grind", zone = grind and grind.zone, reason = why }
 end
 
+------------------------------------------------------------------------------------------
+-- Faixa de nível da zona (spec 032)
+------------------------------------------------------------------------------------------
+Zones.RANGE_MIN_SPAWNS = 100
+local RANGE_TAIL = 0.10 -- peso cortado em cada ponta
+
+-- Menor e maior nível em que o peso acumulado de cada ponta passa de 10% do total.
+local function trimmedRange(hist)
+    local levels, total = {}, 0
+    for l, w in pairs(hist or {}) do
+        if w > 0 then levels[#levels + 1] = l; total = total + w end
+    end
+    if total <= 0 then return nil, nil, 0 end
+    table.sort(levels)
+    local cut = total * RANGE_TAIL
+    local lo, hi, acc = levels[1], levels[#levels], 0
+    for _, l in ipairs(levels) do
+        acc = acc + hist[l]
+        if acc > cut then lo = l; break end
+    end
+    acc = 0
+    for i = #levels, 1, -1 do
+        acc = acc + hist[levels[i]]
+        if acc > cut then hi = levels[i]; break end
+    end
+    return lo, hi, total
+end
+
+-- R1: faixa pelos mobs; com menos de minSpawns spawns, pelas quests.
+function Zones.LevelRange(hist, questLevels, minSpawns)
+    local lo, hi, total = trimmedRange(hist)
+    if lo and total >= (minSpawns or Zones.RANGE_MIN_SPAWNS) then return lo, hi, "mobs" end
+    lo, hi = trimmedRange(questLevels)
+    if lo then return lo, hi, "quests" end
+    return nil
+end
+
+-- R2: cor da faixa para o nível L.
+function Zones.LevelColor(lo, hi, L)
+    if ns.Leveling.MobXP(L, hi, 1) <= 0 then return "gray" end
+    if lo > L + 1 then return "red" end
+    if L <= hi then return "yellow" end
+    return "green"
+end
+
+-- R3: texto da faixa.
+function Zones.FormatRange(lo, hi)
+    if lo == hi then return tostring(lo) end
+    return lo .. "–" .. hi
+end
+
+local RANGE_COLORS = { red = "FF1919", yellow = "FFD100", green = "40C040", gray = "808080" }
+function Zones.RangeLabel(lo, hi, L)
+    return ("|cFF%sníveis %s (est.)|r"):format(RANGE_COLORS[Zones.LevelColor(lo, hi, L)], Zones.FormatRange(lo, hi))
+end
+
+-- Spec 035, R6: zonas vizinhas (divisa a pé), simétrico. neighbors = { [zona] = { vizinhas } }.
+function Zones.Neighbors(zone, neighbors)
+    local out, seen = {}, {}
+    local function add(z) if z ~= zone and not seen[z] then seen[z] = true; out[#out + 1] = z end end
+    for _, z in ipairs(neighbors[zone] or {}) do add(z) end
+    for other, list in pairs(neighbors) do
+        for _, z in ipairs(list) do if z == zone then add(other) end end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Spec 035, R9: viagens que valem. cands = { { zone, eff, levels, ... } }; nearRate = melhor hub perto.
+-- "better" com a mesma margem da 029 (zoneStay): rende mais que o perto dividido pela margem.
+function Zones.WorthTrip(cands, nearRate, p)
+    local ok = {}
+    for _, c in ipairs(cands or {}) do
+        if (c.levels or 0) >= p.zoneMinVisit then ok[#ok + 1] = c end
+    end
+    table.sort(ok, function(a, b) return a.eff > b.eff end)
+    local out = {}
+    for i = 1, math.min(p.tripMax or 2, #ok) do
+        local c = {}
+        for k, v in pairs(ok[i]) do c[k] = v end -- cópia: não altera a candidata recebida
+        c.better = c.eff * p.zoneStay > (nearRate or 0)
+        out[#out + 1] = c
+    end
+    return out
+end
+
 return Zones

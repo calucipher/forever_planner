@@ -210,7 +210,7 @@ end
 --           objectives = { { key, kind, kills, objects, mobXP, points, done } },
 --           elite, dungeon, requires = {ids} }
 -- p = { ttk, downtime, speed, threshold, levelXP, upgradePerPoint, upgradeCap, rested,
---       goldToXP, logFree }
+--       goldToXP, logFree, playerLevel, mobTolerance (spec 031) }
 
 local function pending(q)
     local out = {}
@@ -228,19 +228,103 @@ function Leveling.KillFactor(avgLevel, playerLevel)
 end
 
 -- Spec 030, R2: objetivo com mob médio mais de 1,5 nível acima do jogador.
+-- Spec 031, R5: a tolerância muda com a força do personagem; sem ela, vale o 1,5.
 Leveling.MAX_MOB_ABOVE = 1.5
-function Leveling.MobsTooHigh(avgLevel, playerLevel, state)
+function Leveling.MobsTooHigh(avgLevel, playerLevel, state, tolerance)
     return state ~= "entregar" and avgLevel ~= nil and playerLevel ~= nil and playerLevel ~= false
-        and avgLevel > playerLevel + Leveling.MAX_MOB_ABOVE
+        and avgLevel > playerLevel + (tolerance or Leveling.MAX_MOB_ABOVE)
 end
 
 -- Algum objetivo pendente com mobs altos demais (R2)? objectives = saída de Data.Objectives.
-function Leveling.ObjectivesTooHigh(objectives, playerLevel, state)
+function Leveling.ObjectivesTooHigh(objectives, playerLevel, state, tolerance)
     if state == "entregar" then return false end
     for _, o in ipairs(objectives or {}) do
-        if not o.done and Leveling.MobsTooHigh(o.avgLevel, playerLevel, state) then return true end
+        if not o.done and Leveling.MobsTooHigh(o.avgLevel, playerLevel, state, tolerance) then return true end
     end
     return false
+end
+
+------------------------------------------------------------------------------------------
+-- Força do personagem (spec 031). Todos os números são estimativa, a calibrar no jogo.
+------------------------------------------------------------------------------------------
+local function clamp(v, lo, hi) return max(lo, min(hi, v)) end
+
+Leveling.GEAR_SLOTS = 12     -- cabeça, ombro, peito, cintura, pernas, pés, pulso, mãos, capa, MH, OH, distância
+Leveling.GEAR_GAP = 5        -- item level esperado = nível - 5
+Leveling.GEAR_SCALE = 0.5    -- metade do nível (mínimo 5) acima do esperado = +1 de tolerância
+Leveling.OFFSET_LIMIT = 1    -- o ajuste fica entre -1 e +1
+
+-- R1: média dos 12 slots, vazio conta 0; levels[i] = item level ou nil. Sem nenhum item: nil.
+function Leveling.AvgItemLevel(levels)
+    local total, filled = 0, 0
+    for i = 1, Leveling.GEAR_SLOTS do
+        local v = levels and levels[i]
+        if v and v > 0 then total = total + v; filled = filled + 1 end
+    end
+    if filled == 0 then return nil end
+    return total / Leveling.GEAR_SLOTS
+end
+
+-- R2: ajuste pelo gear, relativo ao nível.
+function Leveling.GearOffset(avgIlvl, playerLevel)
+    if not (avgIlvl and playerLevel) then return 0 end
+    local lim = Leveling.OFFSET_LIMIT
+    local scale = max(5, playerLevel * Leveling.GEAR_SCALE)
+    return clamp((avgIlvl - (playerLevel - Leveling.GEAR_GAP)) / scale, -lim, lim)
+end
+
+Leveling.DANGER_MIN_SAMPLES = 5
+Leveling.DANGER_MIN_ABOVE = -1    -- mob verde não diz nada sobre mob alto
+Leveling.DANGER_PER_LEVEL = 0.25  -- cada nível acima pesa +25% na perda de HP
+Leveling.DANGER_REF = 0.40        -- perda normalizada que dá ajuste 0
+Leveling.DANGER_SPAN = 0.15       -- 0,25 dá +1, 0,55 dá -1
+Leveling.DANGER_DEATH_WINDOW = 10 -- morte nas últimas 10 lutas: ajuste no máximo 0
+Leveling.DANGER_FLEE_LOSS = 0.5   -- luta sem kill só conta com perda alta (fuga, evade)
+Leveling.COMBAT_SPREAD = 0.5      -- o combate corrige o gear em até ±0,5 (até a calibração, T6)
+
+-- R10: amostra de uma luta. f = { start, min, above, targetAbove, died, group }.
+function Leveling.FightSample(f)
+    if not f or f.group then return nil end
+    if f.died then return { loss = 1, above = f.above or f.targetAbove or 0, died = true } end
+    local loss = max(0, (f.start or 1) - (f.min or f.start or 1))
+    if f.above then return { loss = loss, above = f.above } end
+    if loss >= Leveling.DANGER_FLEE_LOSS then return { loss = loss, above = f.targetAbove or 0 } end
+    return nil
+end
+
+-- R3: ajuste pelo combate. samples = { { loss, above, died } }, da mais velha para a mais nova.
+function Leveling.CombatOffset(samples)
+    if not samples then return nil, false end
+    local recentDeath = false -- vale mesmo com poucas amostras (3ª rodada)
+    for i = max(1, #samples - Leveling.DANGER_DEATH_WINDOW + 1), #samples do
+        if samples[i].died then recentDeath = true end
+    end
+    local norm = {}
+    for _, s in ipairs(samples) do
+        local above = s.above or 0
+        if above >= Leveling.DANGER_MIN_ABOVE then
+            norm[#norm + 1] = (s.loss or 0) / (1 + Leveling.DANGER_PER_LEVEL * above)
+        end
+    end
+    if #norm < Leveling.DANGER_MIN_SAMPLES then return nil, recentDeath end
+    table.sort(norm)
+    local n = norm[math.ceil(0.75 * #norm)] -- percentil 75: o risco está na cauda
+    local lim = Leveling.OFFSET_LIMIT
+    local offset = clamp((Leveling.DANGER_REF - n) / Leveling.DANGER_SPAN, -lim, lim)
+    if recentDeath then offset = min(offset, 0) end
+    return offset, recentDeath
+end
+
+-- R4: o combate medido corrige o gear, a no máximo ±0,5 dele; morte recente prende em até 1,5.
+function Leveling.MobTolerance(gearOffset, combatOffset, recentDeath)
+    local g = gearOffset or 0
+    local tol = Leveling.MAX_MOB_ABOVE + g
+    if combatOffset ~= nil then
+        local spread = Leveling.COMBAT_SPREAD
+        tol = Leveling.MAX_MOB_ABOVE + clamp(combatOffset, g - spread, g + spread)
+    end
+    if recentDeath then tol = min(tol, Leveling.MAX_MOB_ABOVE) end
+    return tol
 end
 
 local function workSeconds(o, p)
@@ -262,9 +346,9 @@ local function asideReason(q, p)
     if Leveling.TooHigh(q.qLevel, p.playerLevel, q.state) then return "nível alto" end
     local high -- spec 030, R3: o objetivo mais alto decide; backAt = nível em que volta
     for _, o in ipairs(pending(q)) do
-        if Leveling.MobsTooHigh(o.avgLevel, p.playerLevel, q.state) then high = max(high or 0, o.avgLevel) end
+        if Leveling.MobsTooHigh(o.avgLevel, p.playerLevel, q.state, p.mobTolerance) then high = max(high or 0, o.avgLevel) end
     end
-    if high then return "mobs altos", math.ceil(high - Leveling.MAX_MOB_ABOVE) end
+    if high then return "mobs altos", math.ceil(high - (p.mobTolerance or Leveling.MAX_MOB_ABOVE)) end -- spec 031, R6
     if q.elite then return "elite" end
     if q.dungeon then return "dungeon" end
     if q.state == "pegar" and #(q.starters or {}) == 0 then return "sem coordenada" end
@@ -577,6 +661,102 @@ end
 ------------------------------------------------------------------------------------------
 Leveling.NEW_QUEST_ID = 80000 -- heurística: quests que não existiam no Classic original
 Leveling.CHAIN_XP_FACTOR = 1.5
+
+-- Spec 010, R5, R8 e R10: melhor quest de bolsa. list = { { q, level, mapID, status, skipped, step } }.
+-- step: primeiro passo da cadeia (mesmos campos), quando a quest depende de outra; segue-se o passo.
+-- Só a do log ou disponível, não dispensada; a da zona atual primeiro, depois a de menor nível.
+function Leveling.PickBag(list, zoneMap)
+    local best, bestKey
+    for _, b in ipairs(list) do
+        local s = b.step or b
+        if not b.skipped and (s.status == "no log" or s.status == "disponível") then
+            local key = (s.mapID == zoneMap and 0 or 1) * 1000 + s.level
+            if not bestKey or key < bestKey then best, bestKey = b, key end
+        end
+    end
+    return best
+end
+
+-- Spec 010, R10: primeiro passo da cadeia que leva a q. pre(q) → single, group (alternativas e
+-- obrigatórias); done(q) → já feita; takeable(q) → a raça e a classe podem pegar e não foi feita.
+-- Devolve a quest cujos pré-requisitos estão todos cumpridos, ou nil se o caminho está fechado.
+function Leveling.ChainStart(q, pre, done, takeable, seen)
+    seen = seen or {}
+    if seen[q] then return nil end -- ciclo nos dados
+    seen[q] = true
+    local single, group = pre(q)
+    if single and single[1] then
+        local any = false
+        for _, p in ipairs(single) do if done(p) then any = true; break end end
+        if not any then
+            for _, p in ipairs(single) do
+                if takeable(p) then
+                    local s = Leveling.ChainStart(p, pre, done, takeable, seen)
+                    if s then return s end
+                end
+            end
+            return nil
+        end
+    end
+    -- Obrigatórias: todas as que faltam precisam poder ser pegas; depois desce na primeira.
+    local first
+    for _, p in ipairs(group or {}) do
+        if not done(p) then
+            if not takeable(p) then return nil end
+            first = first or p
+        end
+    end
+    if first then return Leveling.ChainStart(first, pre, done, takeable, seen) end
+    return q
+end
+
+-- Spec 035, R7: o que resolver antes de sair. items = { { id, name, ready, qLevel, zone } } do log;
+-- nearZones = { [zona] = true } de "Perto" (entrega em outra zona conta como entrega da viagem).
+-- Pronta: "entregar". Não pronta que perde XP se subir de nível antes: "perde XP no nível L+1", com loss.
+function Leveling.BeforeLeaving(items, L, nearZones)
+    local ready, losing = {}, {}
+    local falloff = ns.Util.XPFalloff
+    for _, it in ipairs(items or {}) do
+        if it.zone and nearZones and nearZones[it.zone] then
+            if it.ready then
+                ready[#ready + 1] = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel, reason = "entregar" }
+            elseif it.qLevel then
+                local now, next = falloff(L, it.qLevel), falloff(L + 1, it.qLevel)
+                if next < now then
+                    losing[#losing + 1] = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel,
+                        reason = "perde XP no nível " .. (L + 1), loss = now - next }
+                end
+            end
+        end
+    end
+    for _, e in ipairs(losing) do ready[#ready + 1] = e end
+    return ready
+end
+
+-- Spec 035, R16: XP/h efetivo de um hub. Hub com pouco XP no total acaba logo e rende menos.
+function Leveling.HubWorth(rate, xp, levelXP, share)
+    if not (levelXP and levelXP > 0 and share and share > 0) then return rate end
+    return rate * math.min(1, (xp or 0) / (share * levelXP))
+end
+
+-- Spec 035, R8: hubs com quests deixadas de lado por estarem altas (backAt), por hub.
+-- rows = { { key, name, zone, circuit = { aside = { { id, backAt } } } } }.
+function Leveling.ComeBack(rows)
+    local out = {}
+    for _, r in ipairs(rows or {}) do
+        local n, back = 0, nil
+        for _, a in ipairs(r.circuit and r.circuit.aside or {}) do
+            if a.backAt then n = n + 1; back = math.min(back or a.backAt, a.backAt) end
+        end
+        if n > 0 then out[#out + 1] = { key = r.key, name = r.name, zone = r.zone, n = n, backAt = back } end
+    end
+    table.sort(out, function(a, b)
+        if a.backAt ~= b.backAt then return a.backAt < b.backAt end
+        if a.n ~= b.n then return a.n > b.n end
+        return tostring(a.key) < tostring(b.key)
+    end)
+    return out
+end
 
 -- item = { id, classQuest, chainUpgrade, chainXP, medianXP }
 function Leveling.Protected(item)

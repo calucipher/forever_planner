@@ -130,8 +130,9 @@ function Util.CrossingRoute(routes, kind, id)
 end
 
 -- Spec 014: ("npc"|"object", id) a partir do GUID de Creature/Vehicle/GameObject; nil para o resto.
+-- GUID secreto (masmorra, spec 014 R13): não dá para ler o texto, devolve nil.
 function Util.EntityFromGUID(guid)
-    if type(guid) ~= "string" then return nil end
+    if type(guid) ~= "string" or Util.IsSecret(guid) then return nil end
     local kind = guid:match("^(%a+)%-")
     local id = tonumber(guid:match("^%a+%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
     if not id then return nil end
@@ -213,6 +214,13 @@ function Util.BookStarters(startedBy, finisherNpcs, objectiveItems, dropsOf)
     return out
 end
 
+-- Spec 023, R10: todos os NPCs que recebem a quest estão em npcSet? Sem quem recebe, falso.
+function Util.FinishedOnlyBy(finisherNpcs, npcSet)
+    if not (finisherNpcs and finisherNpcs[1]) then return false end
+    for _, n in ipairs(finisherNpcs) do if not npcSet[n] then return false end end
+    return true
+end
+
 -- Spec 014, R11: progresso aberto direto? Sem lista de quests do mesmo NPC nos últimos `window` s.
 -- lastList = { guid, t } da última lista aberta (GOSSIP_SHOW/QUEST_GREETING), ou nil.
 function Util.DirectProgress(lastList, guid, now, window)
@@ -259,6 +267,25 @@ end
 function Util.PlaceKey(kind, id)
     if kind == "object" then return "o" .. tostring(id) end
     return id
+end
+
+-- Spec 036, R2: chave curta do personagem (8 hexadecimais do hash djb2 do GUID). Não guarda o GUID.
+function Util.CharKey(guid)
+    local h = 5381
+    for i = 1, #(guid or "") do h = (h * 33 + guid:byte(i)) % 4294967296 end
+    return string.format("%08x", h)
+end
+
+-- Spec 036, R10: anel. Acrescenta no fim e tira do começo até ficar com max.
+function Util.RingPush(list, item, max)
+    list[#list + 1] = item
+    local n = #list
+    local over = n - max
+    if over == 1 then table.remove(list, 1)
+    elseif over > 1 then -- teto baixou de uma vez: desloca tudo numa passada (O(n), não O(n²))
+        for i = 1, max do list[i] = list[i + over] end
+        for i = max + 1, n do list[i] = nil end
+    end
 end
 
 return Util

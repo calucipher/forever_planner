@@ -6,9 +6,11 @@ Addon de leveling para **World of Warcraft: Forever** (Classic+, interface 16001
 Pensado para Warlock Undead, mas funciona pra qualquer classe e raça.
 
 - **Guia**: ranking dos *hubs* da zona por XP/hora. Cada hub vira um circuito: pegar todas as quests, fazer os objetivos na ordem de menor deslocamento e entregar tudo. Conta o XP dos mobs, o tempo parado e o rested. Quest fraca sai do circuito, a não ser que libere uma cadeia. Elite e dungeon ficam à parte.
+- **Level**: hubs para o seu nível perto de você (zona atual e vizinhas), o que resolver antes de sair e se vale a viagem para outro mapa, com o tempo real do caminho (a pé, voo, zepelim ou barco, pedra de lar). Hub alto demais aparece como "volte no nível N". Você escolhe e segue.
 - **Quests**: ranking das quests da zona, uma a uma, por *valor ÷ tempo*. O valor é XP da quest, XP dos mobs e upgrade de equipamento (com teto de 25%).
-- **GPS**: aponta onde ir (pegar → objetivo → entregar). Usa uma seta na tela com distância, o pino nativo do mapa e o TomTom, se estiver instalado.
+- **GPS**: aponta onde ir (pegar → objetivo → entregar). Usa uma seta na tela com distância, o pino nativo do mapa e o TomTom, se estiver instalado. A pé, a seta segue a estrada em vez da linha reta.
 - **Macros**: leveling e avançadas para Warlock, Warrior, Mage e Druid, feitas para repeat (ex.: Razer Naga): alvo automático só em combate, listas de prioridade e `/castsequence`, criadas com 1 clique. Canalizados e controle vêm marcados "sem repeat". Dica para o spam: `/console Sound_EnableErrorSpeech 0` corta a voz de "não está pronto". O texto usa os nomes do seu client e só os feitiços que você conhece; quando você aprende um feitiço, as macros já criadas se atualizam sozinhas.
+- **Procurar grupo**: na aba Buscar do LFG, um painel ao lado lista os grupos do seu nível primeiro. "Chamar" abre o whisper do líder com o texto pronto (classe, nível, papel e atividade): é só apertar Enter. O painel marca quem você já chamou.
 - **Builds**: talentos por faixa de nível, pesos de atributo editáveis, Legacy e dicas de rota.
 
 ## Instalação
@@ -55,6 +57,8 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 | `/fp bolsas` | Lista as quests de bolsa do personagem: zona, nível e situação |
 | `/fp classe` | Lista as quests de classe (pets, bolsa de alma, Soran'ruk, Felsteed) e segue a melhor |
 | `/fp marcos` | Próximos marcos da classe e perícias de arma que faltam treinar, com o Weapon Master |
+| `/fp lfg` | Abre o painel de procurar grupo. `/fp lfg texto <t>` e `/fp lfg solo <t>` trocam o texto do whisper; `/fp lfg padrao` volta ao original; `/fp lfg copiar` faz o Chamar só copiar o texto |
+| `/fp diario on\|off\|limpar` | Liga, desliga ou apaga o diário (veja Limitações) |
 | `/fp debug` | Liga/desliga o modo debug: registra as decisões do guia (gravado no disco no `/reload` ou logout). `/fp debug chat` mostra no chat também |
 | `/fp diag` | Retrato do estado do guia no chat e no registro |
 | `/fp auto` | Liga ou desliga o auto accept e o auto turn-in (padrão: ligado) |
@@ -88,6 +92,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 | Quests, NPCs, spawns, cadeias, quem dá e quem entrega | QuestieDB (GPL-3.0) |
 | Quais itens cada quest dá | QuestieDB (`Item.questRewards`, invertido no login) |
 | XP | Valor real quando você abre a quest (fica no cache). Senão, tabela da QuestieDB. Senão, mediana por nível de quest (marcada com `*`) |
+| Estradas da seta | Geradas do terreno do client do Forever (texturas de estrada) |
 | Stats dos itens | API do jogo (`C_Item.GetItemStats`), complementada pelo tooltip para dano de escola |
 
 Nada é raspado do Wowhead. Os termos do Wowhead proíbem coleta automatizada, mesmo para uso pessoal.
@@ -102,7 +107,9 @@ Nada é raspado do Wowhead. Os termos do Wowhead proíbem coleta automatizada, m
 - O **ouro** só entra na conta depois que você vê a recompensa (`goldToXP` padrão = 0).
 - A **taxa de drop** é fixa em 45% (a QuestieDB não traz a taxa). O **XP de mob** usa a fórmula do Classic até a calibração medir o do Forever.
 - O **progresso dos objetivos** é lido do log e casado pelo nome do mob ou item. Em client pt-BR, se o nome não casar, o GPS aponta para todos os objetivos.
-- Rota entre zonas não entra: o guia trabalha na zona atual.
+- O guia trabalha na zona atual; a aba **Level** é que compara zonas vizinhas e viagens. Os tempos de voo, zepelim e pedra de lar são estimativas.
+- Em combate e em luta de chefe o painel de grupo mostra "lista indisponível agora" (o jogo esconde a lista dos addons nessa hora). O addon nunca manda mensagem nem convida sozinho: quem aperta Enter é você.
+- O **diário** grava na sua máquina o que você faz no jogo (quests, mortes, viagens) em `ForeverPlannerJournal`, para calibrar as estimativas. Ocupa até ~8 MB. Não sai do seu computador. Desligue com `/fp diario off`.
 
 ## Bugs e sugestões
 

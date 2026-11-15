@@ -83,6 +83,7 @@ end
 
 -- R5 (spec 006): de caverna/cidade sobe até o mapa da zona (mapType 3 = zona).
 local ZONE_MAP_TYPE = 3
+Guide.ZONE_MAP_TYPE = ZONE_MAP_TYPE -- UI/WorldMap.lua usa a mesma constante
 function Guide.ZoneMap(mapID)
     local guard = 0
     while mapID and guard < 5 do
@@ -114,8 +115,9 @@ local function questInfo(q, level, requires)
     local bestItem, delta = ns.Scoring.BestReward(D.Rewards(q))
     local trainSkill, trainOn = ns.ClassGuide.MissingSkillFor(bestItem) -- spec 011, R6
     delta = ns.Milestones.EffectiveDelta(delta, trainSkill)
+    local bag, bonusXP = D.WantsBag(q) -- spec 010 (R8: dispensada não conta; R9: bônus de XP)
     return {
-        bag = D.IsBagQuest(q), -- spec 010
+        bag = bag, bonusXP = bonusXP or nil,
         weapon = ns.Milestones.IsWeaponUpgrade(ns.ClassGuide.ItemClass(bestItem), delta, trainSkill), -- spec 012
         trainSkill = trainSkill, trainOn = trainOn, -- trainOn: arma habilitada na janela Armas (spec 016)
         id = q, name = D.Q.name(q) or ("Quest " .. q), state = ns.Planner.State(q),
@@ -135,6 +137,7 @@ local function params()
         rested = Util.Num(_G.GetXPExhaustion and _G.GetXPExhaustion()) or 0,
         goldToXP = db.goldToXP, logFree = ns.Data.LogFree(),
         playerLevel = UnitLevel("player"), -- spec 025
+        mobTolerance = (ns.FP.MobTolerance()), -- spec 031, R7
     }
 end
 
@@ -197,8 +200,10 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
     local D = ns.Data
     local list, seen = {}, {}
     local function add(info) if info and not seen[info.id] then seen[info.id] = true; list[#list + 1] = info end end
+    -- R1 (spec 006): quest do log só entra pelo logByHub (hub da entrega). Pelo hub de quem deu a
+    -- quest, a entrega em outro mapa virava parada do circuito (ex.: "Sample for Helbrim", 11/11/2026).
     for _, q in ipairs(hub.questList) do
-        if D.IsEligible(q, level) and D.IsRelevant(q, level) then add(safeInfo(q, level)) end
+        if not D.IsOnQuest(q) and D.IsEligible(q, level) and D.IsRelevant(q, level) then add(safeInfo(q, level)) end
     end
     for _, q in ipairs(logByHub[hub.key] or {}) do add(safeInfo(q, level)) end
     -- Satélites (spec 008). R5: no hub seguido, o conjunto fica congelado.
@@ -250,7 +255,7 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
     local names, keptSet = {}, {}
     for _, info in ipairs(list) do
         names[info.id] = info.name .. (info.requires and " (cont.)" or "") .. (info.satellite and " (no caminho)" or "")
-            .. (info.bag and " (bolsa)" or "") .. (info.weapon and " (arma)" or "") .. (info.trainSkill and info.trainOn and (" (treine " .. info.trainSkill .. ")") or "")
+            .. (info.bag and (info.bonusXP and " (bônus de XP)" or " (bolsa)") or "") .. (info.weapon and " (arma)" or "") .. (info.trainSkill and info.trainOn and (" (treine " .. info.trainSkill .. ")") or "")
     end
     for _, k in ipairs(c.kept) do keptSet[k.id] = true end
     c.names, c.satellites = names, {}
@@ -265,17 +270,10 @@ local cache = { key = nil, at = 0, rows = nil }
 
 function Guide.Invalidate() cache.key, cache.rows = nil, nil end
 
-function Guide.Rank(mapID)
+-- Ranking de um mapa, sem cache (a aba Level, spec 035, pede vários mapas de uma vez).
+-- yield, opcional, é chamado a cada hub.
+function Guide.RankMap(mapID, player, level, yield)
     local D = ns.Data
-    if not D.Q then return {} end
-    local level = UnitLevel("player")
-    local player = ns.Planner.PlayerPoint() or { mapID = mapID }
-    mapID = mapID or Guide.ZoneMap(player.mapID)
-    local key = mapID .. ":" .. level
-    local now = _G.GetTime and _G.GetTime() or 0
-    if cache.key == key and cache.rows and now - cache.at < CACHE_SECONDS then return cache.rows end
-
-    failures.count, failures.first = 0, nil
     local hubs = Guide.Hubs(mapID)
     local logByHub = {}
     for _, q in ipairs(D.LogQuests()) do
@@ -296,8 +294,24 @@ function Guide.Rank(mapID)
             rows[#rows + 1] = { key = hub.key, name = hub.name, hub = hub, circuit = c, ready = ready,
                 dist = ns.Planner.Distance(player, hub.points[1]) }
         end
+        if yield then yield() end
     end
     table.sort(rows, function(a, b) return a.circuit.rate > b.circuit.rate end)
+    return rows
+end
+
+function Guide.Rank(mapID)
+    local D = ns.Data
+    if not D.Q then return {} end
+    local level = UnitLevel("player")
+    local player = ns.Planner.PlayerPoint() or { mapID = mapID }
+    mapID = mapID or Guide.ZoneMap(player.mapID)
+    local key = mapID .. ":" .. level
+    local now = _G.GetTime and _G.GetTime() or 0
+    if cache.key == key and cache.rows and now - cache.at < CACHE_SECONDS then return cache.rows end
+
+    failures.count, failures.first = 0, nil
+    local rows = Guide.RankMap(mapID, player, level)
     cache.key, cache.at, cache.rows = key, now, rows
     ns.FP.Debug(string.format("rank mapa=%s nível=%d hubs=%d falhas=%d", tostring(mapID), level, #rows, failures.count))
     return rows
@@ -391,6 +405,7 @@ function Guide.Step()
 end
 
 function Guide.Follow(key)
+    local changed = not (ns.FP.db.guide and ns.FP.db.guide.hub == key)
     ns.FP.db.following = nil
     ns.FP.db.guide = { hub = key }
     Guide.current = nil
@@ -401,6 +416,7 @@ function Guide.Follow(key)
     local nsat = 0
     for _ in pairs(row and row.circuit.satellites or {}) do nsat = nsat + 1 end
     ns.FP.Debug(string.format("follow hub=%s achado=%s satélites=%d", key, tostring(row ~= nil), nsat))
+    if changed then ns.FP.Fire("FOLLOW", "hub", key, row and row.circuit.rate) end -- spec 036, R9
     Guide.Invalidate()
     Guide.Step()
 end
@@ -490,7 +506,7 @@ function Guide.CleanupList(mapID)
                 items[#items + 1] = { id = k.id, name = c.names[k.id], incomplete = true,
                     rate = est.value / math.max(est.seconds, 1), hubRate = hubRate,
                     gray = level - qLevel >= GRAY_LEVELS,
-                    classQuest = (D.Q.requiredClasses(k.id) or 0) ~= 0, bagReward = D.IsBagQuest(k.id),
+                    classQuest = (D.Q.requiredClasses(k.id) or 0) ~= 0, bagReward = D.WantsBag(k.id),
                     chainUpgrade = chainUpgrade, chainXP = chainXP, medianXP = D.medianXPByLevel[qLevel] }
             end
         end
@@ -504,29 +520,68 @@ end
 
 ------------------------------------------------------------------------------------------
 -- Bolsas (spec 010, R5): do log ou disponível na zona atual primeiro, depois menor nível.
+-- Emenda de 12/11/2026: o jogador escolhe na lista (R6) ou dispensa (R7, R8).
 ------------------------------------------------------------------------------------------
 function Guide.BestBag()
     if not dataReady() then return nil end
-    local level = UnitLevel("player")
     local zone = Guide.ZoneMap(C_Map.GetBestMapForUnit("player"))
-    local best, bestKey
-    for _, b in ipairs(ns.Data.BagQuests(level)) do
-        if b.status == "no log" or b.status == "disponível" then
-            local key = (b.mapID == zone and 0 or 1) * 1000 + b.level
-            if not bestKey or key < bestKey then best, bestKey = b, key end
-        end
-    end
-    return best
+    return ns.Leveling.PickBag(ns.Data.BagQuests(UnitLevel("player")), zone)
+end
+
+-- R10: com a quest atrás de outra, segue o primeiro passo da cadeia.
+local function followBagEntry(b)
+    local s = b.step or b
+    local via = b.step and string.format(" · começa por %s (%s)", s.name, s.zone) or ""
+    ns.FP.Print(string.format("seguindo bolsa: %s (%s, %s) — %s%s", b.name, b.itemName or "bolsa", b.zone, s.status, via))
+    ns.FP.Debug("bolsa: seguir " .. s.q .. (b.step and (" (cadeia de " .. b.q .. ")") or ""))
+    ns.Planner.Follow(s.q)
 end
 
 function Guide.FollowBag()
     ns.FP.AfterCombat("followBag", function()
         local b = Guide.BestBag()
         if not b then ns.FP.Print("nenhuma quest de bolsa disponível agora."); return end
-        ns.FP.Print(string.format("seguindo bolsa: %s (%s, %s) — %s", b.name, b.itemName or "bolsa", b.zone, b.status))
-        ns.FP.Debug("bolsa: seguir " .. b.q)
-        ns.Planner.Follow(b.q)
+        followBagEntry(b)
     end)
+end
+
+local function bagEntry(q)
+    if not dataReady() then return nil end
+    for _, b in ipairs(ns.Data.BagQuests(UnitLevel("player"))) do
+        if b.q == q then return b end
+    end
+end
+
+-- R6: segue a quest de bolsa escolhida na lista, se estiver no log ou disponível.
+function Guide.FollowBagQuest(q)
+    ns.FP.AfterCombat("followBag", function()
+        local b = bagEntry(q)
+        if not b then ns.FP.Print("essa quest de bolsa não está mais na lista."); return end
+        local s = b.step or b
+        if s.status ~= "no log" and s.status ~= "disponível" then
+            ns.FP.Print(string.format("%s ainda não dá para fazer: %s%s.", b.name, s.status,
+                b.step and (" (começa por " .. s.name .. ")") or ""))
+            return
+        end
+        followBagEntry(b)
+    end)
+end
+
+-- R7: dispensa a quest de bolsa, ou volta atrás. Devolve true se ficou dispensada.
+function Guide.ToggleBagSkip(q)
+    local db = ns.FP.db
+    db.bagSkipped = db.bagSkipped or {}
+    db.bagSkipped[q] = not db.bagSkipped[q] or nil
+    -- R8: a proteção e a marca do circuito mudam já, também no circuito seguido e na sugestão de zona.
+    Guide.Invalidate()
+    Guide.ResetZoneAdvice()
+    if db.guide then ns.FP.AfterCombat("guideStep", Guide.Step) end
+    local name = ns.Data.Q.name(q) or ("Quest " .. q)
+    ns.FP.Print(db.bagSkipped[q] and (name .. " dispensada: o \"Bolsa\" não vai mais a ela.")
+        or (name .. " voltou para as quests de bolsa."))
+    ns.FP.Debug("bolsa: dispensada " .. q .. " = " .. tostring(db.bagSkipped[q] == true))
+    ns.FP.Fire("CHANGED")
+    return db.bagSkipped[q] == true
 end
 
 -- Abandona só o que o jogador confirmou (R10). Fora de combate.
@@ -614,7 +669,8 @@ local function zoneParams()
         overhead = L.OVERHEAD, legYards = L.UNKNOWN_LEG, speed = db.runSpeed or 7, objectSeconds = L.OBJECT_SECONDS,
         farDelivery = db.farDelivery, unknownKills = db.unknownKills, travelSame = db.travelSame,
         travelOther = db.travelOther, stay = db.zoneStay, minVisit = db.zoneMinVisit,
-        lookahead = db.zoneLookahead, threshold = db.threshold or 0.5 }
+        lookahead = db.zoneLookahead, threshold = db.threshold or 0.5,
+        mobTolerance = (ns.FP.MobTolerance()) } -- spec 031, R7
 end
 Guide.ZoneParams = zoneParams -- tools/pesquisa_zonas.lua usa os mesmos parâmetros (R23)
 
@@ -644,7 +700,7 @@ local function zoneOffer(cat, zone, L, p)
     for _, q in ipairs(cat.zones[zone].quests) do
         local info = cat.info[q]
         if info.solo and info.level <= L + 3 and D.IsEligible(q, L)
-            and not ns.Leveling.ObjectivesTooHigh(D.Objectives(q, L, p.factor), L) then -- spec 030, R4
+            and not ns.Leveling.ObjectivesTooHigh(D.Objectives(q, L, p.factor), L, nil, p.mobTolerance) then -- spec 030, R4; 031, R7
             local unlock = Z.ChainAhead(q, cat, zone, L, doneLookup)
             local gray = L - info.level >= 10
             if D.IsRelevant(q, L) or (gray and unlock > 0 and D.IsRelevant(q, info.level)) then
@@ -668,6 +724,53 @@ local function areaName(area)
     return info and info.name or ("área " .. tostring(area))
 end
 Guide.AreaName = areaName
+Guide.ZoneOffer = zoneOffer -- spec 035: a aba Level usa a mesma oferta de zona
+
+-- Spec 032, R4: faixa de nível da zona, calculada uma vez por catálogo.
+local levels = { cat = nil, byZone = {} }
+local function capital(zone)
+    for _, list in pairs((ns.ZoneContent and ns.ZoneContent.enemyCities) or {}) do
+        if list[zone] then return true end
+    end
+    return false
+end
+
+function Guide.ZoneLevels(zone)
+    local cat = ns.Data.zoneCatalog
+    if not (cat and zone) then return nil end
+    if levels.cat ~= cat then levels.cat, levels.byZone = cat, {} end
+    local hit = levels.byZone[zone]
+    if hit == nil then
+        hit = false
+        local z = cat.zones[zone]
+        if z and z.continent and not capital(zone) then
+            local quests = {}
+            for _, q in ipairs(z.quests or {}) do
+                local info = cat.info[q]
+                if info and info.solo then quests[info.level] = (quests[info.level] or 0) + 1 end
+            end
+            local lo, hi = ns.Zones.LevelRange(z.hist, quests)
+            if lo then hit = { lo, hi } end
+        end
+        levels.byZone[zone] = hit
+    end
+    if not hit then return nil end
+    return hit[1], hit[2]
+end
+
+-- " (lo–hi)" para pôr depois do nome da zona (R7, R8); vazio sem faixa.
+local function rangeSuffix(zone)
+    local lo, hi = Guide.ZoneLevels(zone)
+    return lo and (" (" .. ns.Zones.FormatRange(lo, hi) .. ")") or ""
+end
+
+-- R5: zona (área da zona-mãe) de um uiMapID.
+function Guide.MapZone(mapID)
+    local D = ns.Data
+    local map = Guide.ZoneMap(mapID)
+    local area = map and D.mapToArea and D.mapToArea[map]
+    return area and D.ZoneOfArea(area)
+end
 
 -- Faixa de nível dos mobs que contam no grind (R19).
 local function grindLevels(hist, L)
@@ -721,7 +824,7 @@ function Guide.ComputeZoneAdvice(yield)
                 local potential = math.max(o.value + o.unlock, ahead.value)
                 local raw, eff = Z.Effective(o, travel, potential, levelXP, p.minVisit)
                 cands[#cands + 1] = { zone = zone, raw = raw, eff = eff, n = o.n, travel = travel, offer = o,
-                    estimated = o.estimated, anyRace = z.anyRace }
+                    estimated = o.estimated, anyRace = z.anyRace, potential = potential } -- potential: aba Level (035)
             end
         end
         if yield then yield() end
@@ -736,7 +839,9 @@ function Guide.ComputeZoneAdvice(yield)
 end
 
 -- R18: recálculo fora de combate, em coroutine, com cache por nível + entregas + zona.
-local advice = { key = nil, turnIns = 0, lastNotice = nil, running = false, pending = false, frame = nil }
+local advice = { key = nil, turnIns = 0, lastNotice = nil, running = false, pending = false }
+-- Spec 010, R8: dispensar uma bolsa muda o circuito; a sugestão de zona recalcula na próxima vez.
+function Guide.ResetZoneAdvice() advice.key = nil end
 function Guide.ZoneAdvice() return advice.result end
 
 local function notify(d)
@@ -757,26 +862,17 @@ function Guide.RefreshZoneAdvice()
         if key == advice.key then return end
         advice.running, advice.pending = true, false
         local started = _G.debugprofilestop and _G.debugprofilestop()
-        local co = coroutine.create(function() return Guide.ComputeZoneAdvice(coroutine.yield) end)
-        advice.frame = advice.frame or CreateFrame("Frame")
-        advice.frame:SetScript("OnUpdate", function(self)
-            if Util.InCombat() then return end -- constituição 6: pausa no combate
-            local ok, res = coroutine.resume(co)
-            if not ok then
-                self:SetScript("OnUpdate", nil); advice.running = false
-                ns.FP.Debug("sugestão de zona: erro " .. tostring(res))
-                return
-            end
-            if coroutine.status(co) == "dead" then
-                self:SetScript("OnUpdate", nil)
-                advice.running, advice.key, advice.result = false, key, res
-                local ms = started and (_G.debugprofilestop() - started)
-                ns.FP.Debug(string.format("sugestão de zona: %s %s (%s)%s", res and res.action or "nada",
-                    res and tostring(res.zone) or "", res and res.reason or "", ms and string.format(" %.0f ms", ms) or ""))
-                notify(res)
-                ns.FP.Fire("CHANGED")
-                if advice.pending then Guide.RefreshZoneAdvice() end
-            end
+        -- Corrotina pelo Core (constituição 5 e 6; emenda da spec 035).
+        ns.FP.RunCoroutine("zoneAdvice", Guide.ComputeZoneAdvice, function(ok, res)
+            advice.running = false
+            if not ok then ns.FP.Debug("sugestão de zona: erro " .. tostring(res)); return end
+            advice.key, advice.result = key, res
+            local ms = started and (_G.debugprofilestop() - started)
+            ns.FP.Debug(string.format("sugestão de zona: %s %s (%s)%s", res and res.action or "nada",
+                res and tostring(res.zone) or "", res and res.reason or "", ms and string.format(" %.0f ms", ms) or ""))
+            notify(res)
+            ns.FP.Fire("CHANGED")
+            if advice.pending then Guide.RefreshZoneAdvice() end
         end)
     end)
 end
@@ -796,14 +892,15 @@ ns.FP.On("ZONE_CATALOG", Guide.RefreshZoneAdvice)
 function Guide.ZoneAdviceText(d)
     if not d then return nil end
     local F = Util.FormatInt
-    local here = string.format("|cFFB38CFFAqui:|r %s — %d quests, %s XP/h (est.)", areaName(d.here), d.cur.n,
+    local here = string.format("|cFFB38CFFAqui:|r %s%s — %d quests, %s XP/h (est.)", areaName(d.here), rangeSuffix(d.here), d.cur.n,
         F(math.floor(d.cur.rate + 0.5)))
     local tip
     if d.action == "stay" then
         tip = "|cFF73E65ASugestão:|r ficar (" .. d.reason .. ", est.)"
     elseif d.action == "go" then
         local t = d.target
-        tip = string.format("|cFFFFD24DSugestão:|r ir para %s — %s XP/h, viagem ~%d min (%s, est.)", areaName(d.zone),
+        tip = string.format("|cFFFFD24DSugestão:|r ir para %s%s — %s XP/h, viagem ~%d min (%s, est.)",
+            areaName(d.zone), rangeSuffix(d.zone),
             F(math.floor((t and t.eff or 0) + 0.5)), math.floor((t and t.travel or 0) / 60 + 0.5), d.reason)
         if t and (t.estimated or 0) > 0 then tip = tip .. "; XP das quests novas do Forever é estimado" end
     else
@@ -828,7 +925,7 @@ function Guide.PrintZones()
             local extra = ""
             if (c.estimated or 0) > 0 then extra = extra .. string.format(", %d novas do Forever com XP estimado", c.estimated) end
             if (c.anyRace or 0) > 0 then extra = extra .. string.format(", %d sem raça na base", c.anyRace) end
-            ns.FP.Print(string.format("%d. %s: %s XP/h, %d quests, viagem ~%d min%s", i, areaName(c.zone),
+            ns.FP.Print(string.format("%d. %s%s: %s XP/h, %d quests, viagem ~%d min%s", i, areaName(c.zone), rangeSuffix(c.zone),
                 F(math.floor(c.eff + 0.5)), c.n, math.floor(c.travel / 60 + 0.5), extra))
         end
         local g = d.grind

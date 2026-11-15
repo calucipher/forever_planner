@@ -69,6 +69,48 @@ local function build(panel)
     detail:SetPoint("TOPLEFT"); detail:SetPoint("RIGHT", scroll.child, "RIGHT")
     detail:SetWordWrap(true)
 
+    -- Linhas clicáveis da lista "Bolsas" (spec 010, R6 e R7): clique segue, botão direito dispensa.
+    local BAG_ROW_H, bagRows = 16, {}
+    local function showBagTip(row)
+        if not row.bag then return end
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(row.bag.name, 1, 1, 1)
+        if row.bag.step then -- R10
+            GameTooltip:AddLine(string.format("Começa por %s (%s, %s)", row.bag.step.name, row.bag.step.zone,
+                row.bag.step.status), 0.9, 0.82, 0.3, true)
+        end
+        GameTooltip:AddLine(row.bag.step and "Clique: seguir o primeiro passo da cadeia" or "Clique: seguir esta quest", 0.6, 0.6, 0.7)
+        GameTooltip:AddLine(row.bag.skipped and "Botão direito: voltar a considerar" or "Botão direito: dispensar (não vale mais a pena)",
+            0.6, 0.6, 0.7)
+        GameTooltip:Show()
+    end
+    local function bagRow(i)
+        local row = bagRows[i]
+        if row then return row end
+        row = CreateFrame("Button", nil, scroll.child, "BackdropTemplate")
+        row:SetHeight(BAG_ROW_H)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        Theme.Backdrop(row, { 0, 0, 0, 0 })
+        row.text = Theme.Text(row, 11, Theme.c.text)
+        row.text:SetPoint("LEFT", 2, 0); row.text:SetPoint("RIGHT", -2, 0)
+        row.text:SetJustifyH("LEFT"); row.text:SetWordWrap(false)
+        row:SetScript("OnClick", function(self, button)
+            if not self.bag then return end
+            -- O CHANGED disparado por seguir ou dispensar redesenha a aba (um render só).
+            if button == "RightButton" then ns.Guide.ToggleBagSkip(self.bag.q) else ns.Guide.FollowBagQuest(self.bag.q) end
+        end)
+        row:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(unpack(Theme.c.hover))
+            showBagTip(self)
+        end)
+        row:SetScript("OnLeave", function(self) self:SetBackdropColor(0, 0, 0, 0); GameTooltip:Hide() end)
+        bagRows[i] = row
+        return row
+    end
+    local function hideBagRows(from)
+        for i = from, #bagRows do bagRows[i]:Hide(); bagRows[i].bag = nil end
+    end
+
     local function showTooltip(row)
         local r = row.data
         if not r then return end
@@ -130,7 +172,7 @@ local function build(panel)
             lines[#lines + 1] = "|cFFFF6666Fora do circuito|r"
             for _, a in ipairs(c.aside) do
                 local why = REASONS[a.reason] or a.reason
-                if a.backAt then why = why .. ", volta no " .. a.backAt end -- spec 030, R3
+                if a.backAt then why = why .. ", volta no ~" .. a.backAt end -- spec 030, R3; 031, R9 (estimativa)
                 lines[#lines + 1] = string.format("  · %s  |cFF888888(%s)|r", names[a.id] or tostring(a.id), why)
             end
         end
@@ -159,16 +201,36 @@ local function build(panel)
         local sel
         for _, r in ipairs(data) do if r.key == selected then sel = r end end
         if selected == "__bags" then
-            local lines = { "|cFFB38CFFBolsas|r  ·  clique em Seguir este hub para ir à melhor" }
-            for _, b in ipairs(ns.Data.ready and ns.Data.BagQuests(UnitLevel("player")) or {}) do
-                lines[#lines + 1] = string.format("[%d] %s  |cFF73E65A%s|r  |cFF888888%s · %s|r",
-                    b.level, b.name, b.itemName or "bolsa", b.zone, b.status)
+            local bagList = ns.Data.ready and ns.Data.BagQuests(UnitLevel("player")) or {}
+            detail:SetText("|cFFB38CFFBolsas|r  ·  Seguir este hub vai à melhor  ·  clique numa quest para segui-la"
+                .. "  ·  botão direito dispensa" .. (#bagList == 0 and "\n|cFF888888nenhuma quest de bolsa para este personagem.|r" or ""))
+            local top = detail:GetStringHeight() + 4
+            local following = ns.FP.db.following
+            for i, b in ipairs(bagList) do
+                local row = bagRow(i)
+                row.bag = b
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", 0, -top - (i - 1) * BAG_ROW_H); row:SetPoint("RIGHT", scroll.child, "RIGHT")
+                local s = b.step or b
+                local mark = following == s.q and "|cFF73E65A> |r" or "  "
+                local item = (b.itemName or "bolsa") .. (b.bonus and " (bônus de XP)" or "") -- R9
+                if b.skipped then
+                    row.text:SetText(string.format("%s|cFF666666[%d] %s  %s  · %s · dispensada|r", mark,
+                        b.level, b.name, item, b.zone))
+                else
+                    -- R10: atrás de outra quest, mostra por onde começar.
+                    local status = b.step and string.format("começa por %s (%s, %s)", s.name, s.zone, s.status) or b.status
+                    row.text:SetText(string.format("%s[%d] %s  |c%s%s|r  |cFF888888%s · %s|r", mark,
+                        b.level, b.name, b.bonus and "FFFFD14D" or "FF73E65A", item, b.zone, status))
+                end
+                row:Show()
+                if GameTooltip:IsOwned(row) then showBagTip(row) end -- a linha sob o mouse pode ter mudado de quest
             end
-            if #lines == 1 then lines[2] = "|cFF888888nenhuma quest de bolsa para este personagem.|r" end
-            detail:SetText(table.concat(lines, "\n"))
-            scroll.child:SetHeight(detail:GetStringHeight() + 10)
+            hideBagRows(#bagList + 1)
+            scroll.child:SetHeight(top + #bagList * BAG_ROW_H + 10)
             return
         end
+        hideBagRows(1)
         if selected == "__class" then
             local lines = { "|cFFB38CFFQuests de classe|r  ·  clique em Seguir este hub para ir à melhor" }
             for _, e in ipairs(ns.ClassGuide.List()) do

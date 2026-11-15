@@ -39,7 +39,7 @@ end
 ------------------------------------------------------------------------------------------
 -- Geometria (depende do jogo)
 ------------------------------------------------------------------------------------------
-local function worldPos(mapID, x, y)
+local function worldPos(mapID, x, y) -- também Planner.WorldPos (spec 035)
     if not (C_Map.GetWorldPosFromMapPos and CreateVector2D) then return nil end
     local cont, pos = C_Map.GetWorldPosFromMapPos(mapID, CreateVector2D(x / 100, y / 100))
     if not pos then return nil end
@@ -47,6 +47,7 @@ local function worldPos(mapID, x, y)
     if Util.IsSecret(wx) then return nil end
     return cont, wx, wy
 end
+Planner.WorldPos = worldPos
 
 -- Mesma tabela enquanto o jogador não se move: a posição de mundo fica no cache.
 local lastPlayer
@@ -187,12 +188,13 @@ function Planner.Rank(mapID)
     local player = Planner.PlayerPoint() or { mapID = mapID }
     mapID = mapID or player.mapID
     local rows, failures = {}, { count = 0, first = nil }
+    local tolerance = ns.FP.MobTolerance() -- spec 031, R7
     for _, q in ipairs(D.QuestsForMap(mapID)) do
         if D.IsEligible(q, level) and D.IsRelevant(q, level)
             and not ns.Leveling.TooHigh(D.Q.questLevel(q), level, Planner.State(q)) then -- spec 025, R4
             local ok, row = pcall(function()
                 -- spec 030, R4: dentro do pcall, erro numa quest não derruba a lista (constituição 7)
-                if ns.Leveling.ObjectivesTooHigh(D.Objectives(q, level), level, Planner.State(q)) then return false end
+                if ns.Leveling.ObjectivesTooHigh(D.Objectives(q, level), level, Planner.State(q), tolerance) then return false end
                 return Planner.Evaluate(q, level, player)
             end)
             if ok and row then rows[#rows + 1] = row -- row false = mobs altos: fora, sem ser falha
@@ -212,6 +214,7 @@ end
 ------------------------------------------------------------------------------------------
 function Planner.Follow(q)
     local db = ns.FP.db
+    if db.following ~= q then ns.FP.Fire("FOLLOW", "quest", q) end -- spec 036, R9 (só quando muda)
     db.following = q
     db.guide = nil -- seguir uma quest desliga o guia de hub (os dois brigavam pela seta)
     if ns.Guide then ns.Guide.current = nil end
@@ -346,6 +349,7 @@ local PROGRESS_WINDOW = 60 -- R11: lista ou progresso do mesmo NPC nesse interva
 local lastList, lastDirect
 ns.FP.On("QUEST_DIALOG", function(event)
     local guid = _G.UnitGUID and _G.UnitGUID("npc")
+    if ns.Util.IsSecret(guid) then guid = nil end -- R13: GUID secreto não é comparado nem guardado
     local now = _G.GetTime and _G.GetTime()
     if event == "GOSSIP_SHOW" or event == "QUEST_GREETING" then
         lastList = { guid = guid, t = now, offered = offeredIDs() }

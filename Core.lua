@@ -6,6 +6,23 @@ local FP = {}
 ns.FP = FP
 _G.ForeverPlanner = FP
 
+-- Spec 036, R8a: ação bloqueada pelo jogo, ouvida desde a primeira linha do Core num frame só dela.
+-- Antes do banco carregar, o erro espera numa fila (FP.LogError grava no ADDON_LOADED).
+local earlyErrors, blockedWarned = {}, false
+do
+    local watcher = CreateFrame("Frame")
+    for _, ev in ipairs({ "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do pcall(watcher.RegisterEvent, watcher, ev) end
+    watcher:SetScript("OnEvent", function(_, event, addon, func)
+        if addon ~= ADDON then return end
+        FP.LogError(event .. ": " .. tostring(func))
+        if not blockedWarned and FP.Print then
+            blockedWarned = true
+            FP.Print("o jogo bloqueou a função " .. tostring(func) .. " do addon (" .. event .. "). "
+                .. "Mande isto para o suporte; /console taintLog 1 grava os detalhes em Logs/taint.log.")
+        end
+    end)
+end
+
 FP.defaults = {
     preset = "affliction",      -- perfil de pesos (Weights.lua)
     customWeights = {},         -- sobrescritas por stat
@@ -18,7 +35,7 @@ FP.defaults = {
     threshold = 0.5,            -- agressividade: tira quest com taxa < 50% da média do circuito (R27)
     hubRadius = 80,             -- jardas entre quest givers do mesmo hub (R8)
     satelliteMaxDetour = 400,   -- desvio máximo para pegar satélite no caminho (spec 008)
-    calib = { xp = {}, kill = {} }, -- amostras reais das últimas mortes (R7)
+    calib = { xp = {}, kill = {}, danger = {} }, -- amostras reais das últimas mortes (R7) e lutas (spec 031)
     guide = nil,                -- hub seguido pelo GPS { map =, hub = }
     minimap = { angle = 225, hide = false }, -- botão do minimapa (spec 004)
     auto = true,                -- auto accept e auto turn-in (spec 005)
@@ -29,13 +46,14 @@ FP.defaults = {
     runSpeed = 7,               -- jardas/s a pé
     showOnlyCurrentZone = true,
     autoNext = true,            -- ao entregar a quest seguida, segue a próxima melhor
-    gps = { arrow = true, native = true, tomtom = true, arriveYards = 12, x = 0, y = -160 },
+    gps = { arrow = true, native = true, tomtom = true, roads = true, arriveYards = 12, x = 0, y = -160 },
     ui = { point = "CENTER", x = 0, y = 0, tab = "quests" },
     cache = { xp = {}, money = {} }, -- recompensas reais vistas no diálogo de quest
     following = nil,            -- questID seguido pelo GPS
     unavailable = {},           -- quests que o jogo não ofereceu no NPC (spec 014)
     unavailableSeen = {},       -- visitas em que o NPC não ofereceu a quest (marca na 2ª, spec 014)
     weaponsOff = {},            -- armas que o jogador desabilitou na janela Armas (spec 016)
+    bagSkipped = {},            -- quests de bolsa dispensadas pelo jogador (spec 010, R7)
     groupAnnounce = true,       -- avisos de quest no chat do grupo (spec 022)
     -- Sugestão de zona (spec 029, R17): estimativas até calibrar no jogo
     zoneStay = 0.6,             -- fica enquanto render >= 60% da melhor alternativa
@@ -46,6 +64,20 @@ FP.defaults = {
     grindMinSpawns = 60,        -- grind só conta com pelo menos 60 spawns na faixa
     unknownKills = 6,           -- quest nova do Forever sem objetivo na base
     farDelivery = 300,          -- entrega em outra zona (s)
+    -- Spec 035: viagem real (ESTIMATIVA; a spec 036 mede no jogo). fly/flyFactor/flyOverhead = spec 024.
+    travel = { walkFactor = 1.2, fly = 32, flyFactor = 1.25, flyOverhead = 20, boardWait = 150, ride = 90,
+        hearthSeconds = 30, hearthMinSave = 300 }, -- hearthMinSave: a pedra só vale se poupar 5 min (R4)
+    journalMax = 40000,         -- spec 036: teto do diário (~8 MB de SavedVariables, medido em diário sintético)
+    journalSeed = nil,          -- spec 036, R2: semente aleatória da chave do personagem no diário
+    hubMinShare = 0.15,         -- spec 035, R16: hub com menos de 15% do XP do nível rende proporcionalmente menos
+    bind = nil,                 -- ponto da pedra de lar { mapID, x, y, name } (spec 035, R11)
+    -- Spec 037: procurar grupo. Texto em inglês porque o servidor é americano (decisão de 14/11/2026).
+    lfgWhisper = "hi! {classe} {nivel} ({papel}) for {atividade}, room for one more?",
+    lfgWhisperSolo = "hi! {classe} {nivel} ({papel}), want to group up for {atividade}?",
+    lfgListComment = "{classe} {nivel} ({papel}) LF group", -- R15: comentário para se listar sozinho
+    lfgCallTTL = 600,          -- R6: chamado vira "sem resposta" depois de 10 min (ESTIMATIVA)
+    lfgPrefill = true,          -- R12: false = plano B (texto para Ctrl+C, sem abrir o whisper)
+    lfgRole = nil,              -- R8: papel escolhido no painel ("DPS", "Tank", "Healer")
 }
 
 function FP.Print(...)
@@ -76,7 +108,7 @@ function FP.Debug(msg, force)
 end
 function FP.LogError(msg)
     local db = FP.db
-    if not db then return end
+    if not db then table.insert(earlyErrors, tostring(msg)); return end -- R8a: grava no ADDON_LOADED
     db.debugErrors = db.debugErrors or {}
     push(db.debugErrors, stamp() .. " " .. tostring(msg), MAX_ERRORS)
     FP.Debug("ERRO: " .. tostring(msg))
@@ -117,6 +149,104 @@ function FP.MobXPFactor()
     return ns.Leveling.Mean(FP.db.calib.xp, MIN_SAMPLES) or FP.db.mobXPFactor or 1
 end
 
+-- Força do personagem (spec 031). Slots de GetInventoryItemLink, na ordem de Leveling.AvgItemLevel.
+local GEAR_SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18 }
+local OFFHAND = 11 -- posição da mão secundária na lista acima
+local function slotItemLevel(slot)
+    local link = _G.GetInventoryItemLink and _G.GetInventoryItemLink("player", slot)
+    if not link then return nil, false end
+    local ilvl = C_Item.GetDetailedItemLevelInfo and C_Item.GetDetailedItemLevelInfo(link)
+    ilvl = Util.Num(ilvl) or Util.Num((select(4, C_Item.GetItemInfo(link))))
+    local equipLoc = C_Item.GetItemInfoInstant and select(4, C_Item.GetItemInfoInstant(link))
+    return ilvl, true, equipLoc == "INVTYPE_2HWEAPON"
+end
+-- Item level médio, ou nil se algum item equipado ainda não está no cache (R1).
+function FP.GearItemLevel()
+    local levels = {}
+    for i, slot in ipairs(GEAR_SLOTS) do
+        local ilvl, equipped, twoHand = slotItemLevel(slot)
+        if equipped and not ilvl then return nil end
+        levels[i] = ilvl or levels[i]
+        if twoHand and not levels[OFFHAND] then levels[OFFHAND] = ilvl end
+    end
+    return ns.Leveling.AvgItemLevel(levels)
+end
+-- Tolerância de mobs altos (R4, R7): tolerância, fonte e número de amostras de luta.
+function FP.MobTolerance()
+    local L = ns.Leveling
+    local danger = FP.db.calib.danger or {}
+    local combat, recentDeath = L.CombatOffset(danger)
+    local avg = FP.GearItemLevel()
+    local source = combat and "combate" or (avg and "gear" or "padrão")
+    return L.MobTolerance(L.GearOffset(avg, UnitLevel("player")), combat, recentDeath), source, #danger
+end
+
+-- /fp calib e o botão "Calibração" do menu + (spec 031, R9)
+function FP.PrintCalib()
+    FP.Print(string.format("tempo por morte: %.1f s (%d amostras) · fator de XP: %.2f (%d amostras)",
+        FP.KillSeconds(), #FP.db.calib.kill, FP.MobXPFactor(), #FP.db.calib.xp))
+    local tol, source, n = FP.MobTolerance()
+    FP.Print(string.format("tolerância de mobs altos: +%.1f nível (fonte: %s, %d lutas; estimativa)",
+        tol, source, n))
+end
+
+-- Coleta das lutas (R8): o Core só junta os dados; a regra da amostra é Leveling.FightSample (R10).
+-- Sem combat log: a API do Forever é a 12.x.
+local fight -- { start, min, level, targetAbove, above, group, died, closing }
+local FIGHT_CLOSE_DELAY = 1 -- s: o XP do kill pode chegar depois do fim do combate
+local function hpFraction()
+    local h, m = _G.UnitHealth and _G.UnitHealth("player"), _G.UnitHealthMax and _G.UnitHealthMax("player")
+    if Util.IsSecret(h) or Util.IsSecret(m) then return nil end
+    h, m = Util.Num(h), Util.Num(m)
+    if not (h and m) or m <= 0 then return nil end
+    return h / m
+end
+local function inGroup() return _G.IsInGroup ~= nil and _G.IsInGroup() == true end
+local function targetAbove(level)
+    if not (level and _G.UnitCanAttack and _G.UnitCanAttack("player", "target")) then return nil end
+    local l = UnitLevel("target")
+    if Util.IsSecret(l) then return nil end
+    l = Util.Num(l)
+    return l and l > 0 and l - level or nil -- -1 = caveira: nível desconhecido
+end
+local function FightFinish(f)
+    if f.done then return end -- R8: o timer não grava de novo a luta já fechada
+    f.done = true
+    local sample = ns.Leveling.FightSample(f)
+    if sample then
+        FP.db.calib.danger = FP.db.calib.danger or {}
+        ns.Leveling.PushSample(FP.db.calib.danger, sample, 20)
+    end
+    if fight == f then fight = nil end
+end
+local function FightStart()
+    if fight then FightFinish(fight) end -- a luta anterior ainda fechando
+    local hp, level = hpFraction() or 1, Util.Num(UnitLevel("player"))
+    fight = { start = hp, min = hp, level = level, targetAbove = targetAbove(level), group = inGroup() }
+end
+local function FightHealth()
+    local f = fight and hpFraction()
+    if f and f < fight.min then fight.min = f end
+end
+local function FightKill(mobLevel)
+    if fight and fight.level and mobLevel then
+        fight.above = math.max(fight.above or -math.huge, mobLevel - fight.level)
+    end
+end
+local function FightEnd()
+    if not fight or fight.closing then return end
+    FightHealth()
+    local f = fight
+    f.group, f.closing = f.group or inGroup(), true
+    if C_Timer and C_Timer.After then C_Timer.After(FIGHT_CLOSE_DELAY, function() FightFinish(f) end)
+    else FightFinish(f) end
+end
+local function FightDeath()
+    if not fight then return end -- queda ou afogamento fora de luta não contam
+    fight.died = true
+    FightFinish(fight)
+end
+
 -- Calibração pelo chat de XP: "X dies, you gain N experience." (R7, D7)
 local xpPattern, lastKill
 local function OnXPGain(msg)
@@ -127,13 +257,16 @@ local function OnXPGain(msg)
     xp = tonumber(xp)
     if not (name and xp) then return end
     local rested = tonumber(msg:match("%(%+?(%d+)")) or 0
+    FP.Fire("KILL_XP", xp, name) -- spec 036: o diário grava a morte com o mob mirado com esse nome
     local now = _G.GetTime and _G.GetTime() or 0
     if lastKill then FP.RecordKillGap(now - lastKill) end
     lastKill = now
     local ids = ns.Data.N.IdsByName and ns.Data.N.IdsByName(name)
     local id = ids and ids[1]
-    local lvl = id and ns.Data.N.minLevel(id)
+    -- spec 036, R20: o nível visto no jogo (mirando o mob) vale mais que o da QuestieDB pelo nome
+    local lvl = (ns.Journal and ns.Journal.SeenLevelByName(name)) or (id and ns.Data.N.minLevel(id))
     if not lvl or lvl <= 0 then return end
+    FightKill(lvl) -- spec 031, R8
     local expected = ns.Leveling.MobXP(UnitLevel("player"), lvl, 1)
     if expected > 0 then ns.Leveling.PushSample(FP.db.calib.xp, (xp - rested) / expected, 20) end
 end
@@ -142,6 +275,28 @@ end
 local pending = {}
 function FP.AfterCombat(key, fn)
     if Util.InCombat() then pending[key] = fn else fn() end
+end
+
+-- Spec 035, R12: cálculo longo em corrotina, um passo por quadro, pausado em combate (constituição 6).
+-- O frame fica aqui (constituição 5). fn(yield) devolve o resultado; done(ok, resultadoOuErro).
+-- Devolve false se já houver um cálculo com a mesma chave rodando.
+local runners = {}
+function FP.RunCoroutine(key, fn, done)
+    local r = runners[key]
+    if r and r.co then return false end
+    r = r or { frame = CreateFrame("Frame") }
+    runners[key] = r
+    r.co = coroutine.create(function() return fn(coroutine.yield) end)
+    r.frame:SetScript("OnUpdate", function(self)
+        if Util.InCombat() then return end
+        local ok, res = coroutine.resume(r.co)
+        if not ok or coroutine.status(r.co) == "dead" then
+            self:SetScript("OnUpdate", nil)
+            r.co = nil
+            done(ok, res)
+        end
+    end)
+    return true
 end
 
 -- Recompensa real vista na tela da quest: corrige a estimativa
@@ -163,7 +318,11 @@ local EVENTS = {
     "QUEST_ACCEPTED", "QUEST_TURNED_IN", "QUEST_LOG_UPDATE", "ZONE_CHANGED_NEW_AREA",
     "PLAYER_LEVEL_UP", "PLAYER_EQUIPMENT_CHANGED", "GET_ITEM_INFO_RECEIVED",
     "CHAT_MSG_COMBAT_XP_GAIN", "SPELLS_CHANGED", "QUEST_PROGRESS", "GOSSIP_SHOW", "QUEST_GREETING",
-    "QUEST_REMOVED",
+    "QUEST_REMOVED", "PLAYER_REGEN_DISABLED", "PLAYER_DEAD", -- spec 031, R8
+    "CHAT_MSG_SYSTEM", "PLAYER_ENTERING_WORLD", -- spec 035, R11: ponto da pedra de lar
+    -- spec 036: diário (mob visto, morte de mob, saque, tempo jogado, saída)
+    -- Sem COMBAT_LOG_EVENT_UNFILTERED: com ele, o cliente mostrou "blocked from an action" (13/11/2026).
+    "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "LOOT_OPENED", "TIME_PLAYED_MSG", "PLAYER_LOGOUT",
     { "LEARNED_SPELL_IN_SKILL_LINE", "LEARNED_SPELL_IN_TAB" }, -- renomeado no Mainline 11.0
 }
 FP.missingEvents = {}
@@ -177,16 +336,53 @@ for _, entry in ipairs(EVENTS) do
     end
     if not ok then table.insert(FP.missingEvents, table.concat(names, "/")) end
 end
+do -- spec 031, R8: só o HP do jogador
+    local ok = frame.RegisterUnitEvent ~= nil and pcall(frame.RegisterUnitEvent, frame, "UNIT_HEALTH", "player")
+    if not ok then ok = pcall(frame.RegisterEvent, frame, "UNIT_HEALTH") end
+    if not ok then table.insert(FP.missingEvents, "UNIT_HEALTH") end
+end
+do -- spec 035, R11: feitiço do jogador (pedra de lar)
+    for _, ev in ipairs({ "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_START" }) do -- START: spec 036, R6
+        local ok = frame.RegisterUnitEvent ~= nil and pcall(frame.RegisterUnitEvent, frame, ev, "player")
+        if not ok then table.insert(FP.missingEvents, ev) end
+    end
+end
 
 local itemRefreshQueued = false
-local QUIET = { GET_ITEM_INFO_RECEIVED = true }
-frame:SetScript("OnEvent", function(_, event, arg1, arg2)
+local QUIET = { GET_ITEM_INFO_RECEIVED = true, UNIT_HEALTH = true, CHAT_MSG_SYSTEM = true, UNIT_SPELLCAST_SUCCEEDED = true,
+    UNIT_SPELLCAST_START = true, UPDATE_MOUSEOVER_UNIT = true }
+-- Spec 036: eventos que só alimentam o diário (FP.Fire e nada mais).
+local JOURNAL_EVENTS = { PLAYER_TARGET_CHANGED = { "UNIT_LOOK", "target" }, UPDATE_MOUSEOVER_UNIT = { "UNIT_LOOK", "mouseover" },
+    LOOT_OPENED = { "LOOT" }, PLAYER_LOGOUT = { "LOGOUT" } }
+frame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if FP.db and FP.db.debug and not QUIET[event] then
         FP.Debug(string.format("evento %s %s", event, tostring(arg1 or "")))
+    end
+    if event == "CHAT_MSG_SYSTEM" then
+        FP.Fire("SYSTEM_MSG", arg1)
+        return
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        if arg1 == "player" then FP.Fire("SPELL_DONE", arg3) end
+        return
+    elseif JOURNAL_EVENTS[event] then
+        local e = JOURNAL_EVENTS[event]
+        FP.Fire(e[1], e[2])
+        return
+    elseif event == "TIME_PLAYED_MSG" then
+        FP.Fire("TIME_PLAYED", arg1)
+        return
+    elseif event == "UNIT_SPELLCAST_START" then
+        if arg1 == "player" then FP.Fire("SPELL_START", arg3) end
+        return
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        FP.Fire("ENTERING_WORLD")
+        return
     end
     if event == "ADDON_LOADED" and arg1 == ADDON then
         ForeverPlannerDB = Util.CopyDefaults(FP.defaults, ForeverPlannerDB)
         FP.db = ForeverPlannerDB
+        for _, msg in ipairs(earlyErrors) do FP.LogError(msg) end -- spec 036, R8a
+        earlyErrors = {}
         FP.Fire("DB_READY")
     elseif event == "PLAYER_LOGIN" then
         local ok, msg = ns.Data.Init()
@@ -201,7 +397,15 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2)
             FP.Print("|cFFFFAA00eventos que não existem neste client (função ligada a eles fica parada):|r "
                 .. table.concat(FP.missingEvents, ", "))
         end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        FightStart()
+    elseif event == "UNIT_HEALTH" then
+        if arg1 == "player" then FightHealth() end
+    elseif event == "PLAYER_DEAD" then
+        FightDeath()
+        FP.Fire("DIED") -- spec 036, R8
     elseif event == "PLAYER_REGEN_ENABLED" then
+        FightEnd()
         for k, fn in pairs(pending) do pending[k] = nil; pcall(fn) end
     elseif event == "QUEST_DETAIL" or event == "QUEST_COMPLETE" then
         CacheQuestRewards()
@@ -210,7 +414,7 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2)
         FP.Fire("QUEST_DIALOG", event)
     elseif event == "QUEST_TURNED_IN" then
         if ns.Data.MarkTurnedIn then ns.Data.MarkTurnedIn(arg1) end -- spec 006, R12
-        FP.Fire("QUEST_TURNED_IN", arg1)
+        FP.Fire("QUEST_TURNED_IN", arg1, arg2, arg3) -- spec 036: XP e dinheiro da entrega
         FP.Fire("CHANGED")
     elseif event == "QUEST_REMOVED" then
         FP.Fire("QUEST_REMOVED", arg1) -- spec 006, R15: a quest saiu do log (entregue ou abandonada)
@@ -273,13 +477,18 @@ SlashCmdList.FOREVERPLANNER = function(msg)
         end
     elseif cmd == "diag" then
         ns.DebugTools.Diag()
+    elseif cmd == "diario" then
+        ns.Journal.Command(rest) -- spec 036, R11
     elseif cmd == "bolsa" then
         ns.Guide.FollowBag()
     elseif cmd == "bolsas" then
         local list = ns.Data.Q and ns.Data.ready and ns.Data.BagQuests(UnitLevel("player")) or {}
         if #list == 0 then FP.Print("nenhuma quest de bolsa para este personagem (ou dados ainda carregando).") end
         for _, b in ipairs(list) do
-            FP.Print(string.format("[%d] %s — %s (%s) — %s", b.level, b.name, b.itemName or "bolsa", b.zone, b.status))
+            local status = b.step and string.format("começa por %s (%s, %s)", b.step.name, b.step.zone, b.step.status)
+                or b.status -- spec 010, R10
+            FP.Print(string.format("[%d] %s — %s%s (%s) — %s%s", b.level, b.name, b.itemName or "bolsa",
+                b.bonus and " (bônus de XP)" or "", b.zone, status, b.skipped and " — dispensada" or ""))
         end
     elseif cmd == "classe" then
         ns.ClassGuide.PrintList()
@@ -305,6 +514,8 @@ SlashCmdList.FOREVERPLANNER = function(msg)
         ns.Guide.FollowBest("turnin")
     elseif cmd == "limpar" then
         ns.QuickMenu.ShowCleanup()
+    elseif cmd == "lfg" then
+        ns.LfgPanel.Command(rest) -- spec 037
     elseif cmd == "grupo" then
         if rest == "avisos" then ns.Group.ToggleAnnounce() else ns.Group.ShareAll() end -- spec 022
     elseif cmd == "auto" then
@@ -318,8 +529,7 @@ SlashCmdList.FOREVERPLANNER = function(msg)
                 name and ("|cFF73E65A" .. name .. "|r") or "|cFF888888não conhecido|r"))
         end
     elseif cmd == "calib" then
-        FP.Print(string.format("tempo por morte: %.1f s (%d amostras) · fator de XP: %.2f (%d amostras)",
-            FP.KillSeconds(), #FP.db.calib.kill, FP.MobXPFactor(), #FP.db.calib.xp))
+        FP.PrintCalib()
     elseif cmd == "clear" or cmd == "stop" then
         ns.Gps.Clear(); FP.db.following = nil; FP.db.guide = nil; FP.Fire("CHANGED")
     elseif cmd == "preset" and rest ~= "" then
@@ -334,6 +544,6 @@ SlashCmdList.FOREVERPLANNER = function(msg)
     elseif cmd == "ttk" and tonumber(rest) then
         FP.db.ttk = tonumber(rest); FP.Fire("CHANGED"); FP.Print("TTK:", FP.db.ttk, "s")
     else
-        FP.Print("comandos: /fp, /fp guia, /fp next, /fp clear, /fp preset <nome>, /fp stats <link>, /fp ttk <seg>, /fp agressividade <0-100>, /fp calib, /fp macros, /fp minimapa, /fp auto, /fp grupo [avisos], /fp entregar, /fp limpar, /fp debug [chat], /fp diag, /fp bolsa, /fp bolsas, /fp classe, /fp marcos, /fp armas, /fp indisponiveis [limpar]")
+        FP.Print("comandos: /fp, /fp guia, /fp next, /fp clear, /fp preset <nome>, /fp stats <link>, /fp ttk <seg>, /fp agressividade <0-100>, /fp calib, /fp macros, /fp minimapa, /fp auto, /fp grupo [avisos], /fp entregar, /fp limpar, /fp debug [chat], /fp diag, /fp bolsa, /fp bolsas, /fp classe, /fp marcos, /fp armas, /fp indisponiveis [limpar], /fp diario [on|off|limpar], /fp lfg [texto|solo|padrao|copiar]")
     end
 end

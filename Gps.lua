@@ -49,6 +49,17 @@ function Gps.PlanFlight(player, target, nodes, opts)
     return { from = a, to = b, walk = walk, total = total }
 end
 
+-- Spec 034, R8: ir pela estrada compensa? Caminho de Roads.Path ou nil.
+function Gps.PlanRoad(player, target, graph, opts)
+    if not (player and target and graph) then return nil end
+    local straight = span(player, target)
+    if straight <= opts.minDist then return nil end
+    local path = ns.Roads.Path(graph, player, target)
+    if not path or path.accessFrom > opts.maxAccess or path.accessTo > opts.maxAccess then return nil end
+    if path.accessFrom + path.road + path.accessTo > opts.factor * straight then return nil end
+    return path
+end
+
 ------------------------------------------------------------------------------------------
 -- Rota com voo (spec 024): constantes são estimativa, a calibrar no jogo
 ------------------------------------------------------------------------------------------
@@ -101,6 +112,47 @@ local function reroute()
         overhead = FLIGHT.overhead, margin = FLIGHT.margin }
     local plan = Gps.PlanFlight({ x = px, y = py }, { x = t.world[2], y = t.world[3] }, taxiNodes(cont), opts)
     return plan and { from = plan.from, to = plan.to } or nil
+end
+
+------------------------------------------------------------------------------------------
+-- Pela estrada (spec 034): constantes são estimativa, a calibrar no jogo
+------------------------------------------------------------------------------------------
+local ROAD = { minDist = 400, maxAccess = 150, factor = 1.6, ahead = 30, offRoute = 60 }
+Gps.road = nil -- caminho de Roads.Path + dest, para o trecho a pé (até o alvo ou o ponto de voo)
+
+-- R11/R12/R13: caminho para o trecho a pé; reaproveita o atual se o destino não mudou.
+local function planRoad()
+    local t = Gps.target
+    if not (t and t.world) or ns.FP.db.gps.roads == false then return nil end
+    if _G.UnitOnTaxi and _G.UnitOnTaxi("player") then return nil end
+    local graphs = ns.RoadGraphs
+    local cont, px, py = playerWorld()
+    if not (graphs and cont and cont == t.world[1] and graphs[cont]) then return nil end
+    local leg = Gps.leg
+    local dest = leg and { x = leg.from.x, y = leg.from.y } or { x = t.world[2], y = t.world[3] }
+    local cur = Gps.road
+    if cur and cur.dest.x == dest.x and cur.dest.y == dest.y then return cur end
+    if InCombatLockdown() then return nil end -- constituição 6: nada pesado em combate
+    local path = Gps.PlanRoad({ x = px, y = py }, dest, graphs[cont], ROAD)
+    if not path then return nil end
+    -- R9/R10: a rota seguida começa no jogador e termina no destino (acessos inclusos)
+    local route = { { x = px, y = py } }
+    for _, pt in ipairs(path.points) do route[#route + 1] = pt end
+    route[#route + 1] = dest
+    path.dest, path.route, path.aim = dest, route, { lost = ROAD.offRoute }
+    return path
+end
+
+local function updateRoad()
+    local ok, road = pcall(planRoad)
+    if not ok then
+        ns.FP.Debug("gps: estrada descartada: " .. tostring(road))
+        road = nil
+    end
+    if (road ~= nil) ~= (Gps.road ~= nil) then
+        ns.FP.Debug(road and string.format("gps: pela estrada (%d yd)", road.road) or "gps: sem estrada")
+    end
+    Gps.road = road
 end
 
 -- Título mostrado na seta (R2): com trecho de voo, "Voar: A > B · depois: <título>".
@@ -196,9 +248,24 @@ function Gps.UpdateArrow(f)
     local leg = Gps.leg
     local aimX, aimY = t.world[2], t.world[3]
     if leg then aimX, aimY = leg.from.x, leg.from.y end
+    -- Spec 034, R9/R10: com caminho, mira 30 jd à frente nele; longe dele, descarta e o ticker replaneja.
+    local road, distText = Gps.road, nil
+    if road then
+        local okAim, aim, off, left = pcall(ns.Roads.Aim, road.route, { x = px, y = py }, ROAD.ahead, road.aim)
+        if not okAim then
+            Gps.road = nil
+            ns.FP.Debug("gps: estrada descartada na seta: " .. tostring(aim))
+        elseif not aim or off > ROAD.offRoute then
+            Gps.road = nil
+            ns.FP.Debug(string.format("gps: fora da estrada (%d yd)", off or -1))
+        elseif left > 1 then
+            aimX, aimY = aim.x, aim.y
+            distText = string.format("%d yd pela estrada", left)
+        end
+    end
     local rel, aimDist = Gps.Relative(px, py, aimX, aimY, facing)
     f.tex:SetRotation(rel)
-    f.dist:SetText(string.format("%d yd", aimDist))
+    f.dist:SetText(distText or string.format("%d yd", aimDist))
     if dist <= (ns.FP.db.gps.arriveYards or 12) and not t.arrived then
         t.arrived = true
         ns.FP.Debug(string.format("gps: chegou (%d yd) %s", dist, tostring(t.title)))
@@ -275,6 +342,7 @@ function Gps.SetTarget(mapID, x, y, title)
     ns.FP.Debug(string.format("gps: alvo %s @%s %.1f,%.1f mundo=%s", tostring(title), tostring(mapID), x, y, tostring(world ~= nil)))
     local ok, leg = pcall(reroute)
     Gps.leg = ok and leg or nil
+    updateRoad()
     if not ticker and C_Timer and C_Timer.NewTicker then ticker = C_Timer.NewTicker(REROUTE_EVERY, Gps.Reroute) end
     if db.arrow then arrow = arrow or buildArrow() end
     showWaypoint()
@@ -291,10 +359,12 @@ function Gps.Reroute()
     if not Gps.target then return end
     local ok, leg = pcall(reroute)
     if not ok then leg = nil end
-    if legKey(leg) == legKey(Gps.leg) then return end
-    Gps.leg = leg
-    ns.FP.Debug("gps: rota " .. (leg and legKey(leg) or "a pé"))
-    showWaypoint()
+    if legKey(leg) ~= legKey(Gps.leg) then
+        Gps.leg = leg
+        ns.FP.Debug("gps: rota " .. (leg and legKey(leg) or "a pé"))
+        showWaypoint()
+    end
+    updateRoad()
 end
 
 -- R18: contexto sob a seta (hub, parada i de N, próximas). nil apaga.
@@ -307,6 +377,7 @@ function Gps.Clear(silent)
     if Gps.target then ns.FP.Debug("gps: limpo") end
     Gps.target = nil
     Gps.leg = nil
+    Gps.road = nil
     if ticker then ticker:Cancel(); ticker = nil end
     Gps.SetInfo(nil)
     clearWaypoints()

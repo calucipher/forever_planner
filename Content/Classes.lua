@@ -40,7 +40,8 @@ Classes.WARLOCK = {
         { lvl = 10, key = "talentos", text = "Talentos abrem: comece por Suppression (Affliction). Veja a aba Builds." },
         { lvl = 10, key = "voidwalker", spell = 697, text = "Voidwalker: quest de classe (Undead: Halgar's Summons, em Brill, segue pra Undercity). Hub Classe na aba Guia." },
         { lvl = 10, key = "armas", text = "Treine Cajados (Orgrimmar ou Thunder Bluff) e Espadas de uma mão (Undercity): as melhores armas de quest do early são cajados." },
-        { lvl = 14, key = "cozy", text = "Cozy Sleeping Bag: a chain começa no Barrens (torre queimada ao sul de Camp Taurajo) e dá duas bolsas de 12. Vale fazer quando passar por Barrens/Stonetalon." },
+        { lvl = 14, key = "cozy", text = "Cozy Sleeping Bag: a chain começa no Barrens (torre queimada ao sul de Camp Taurajo). No 2º passo dá o Old Toolbox (bolsa); no fim, o Cozy Sleeping Bag (bônus de XP ao descansar, estimativa). Está na lista Bolsas da aba Guia." },
+        -- cozy: recompensas pela QuestieDB (12/11/2026); o texto antigo dizia "duas bolsas de 12".
         { lvl = 15, key = "rathmael", text = "The Wrath of Rath'mael (Brill, Ruins of Lordaeron): Gnarled Necromancer's Staff, +26 SP no 22." },
         { lvl = 20, key = "sayaad", spell = 712, text = "Sayaad (Succubus/Incubus) e Small Soul Pouch: quest de classe." },
         { lvl = 20, key = "soranruk", text = "The Orb of Soran'ruk: fragmentos de BFD e SFK; Staff (+34 Sombra/Fogo) ou Orb. Só se for fazer as duas dungeons." },

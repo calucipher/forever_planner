@@ -238,6 +238,8 @@ function Data.IsRelevant(q, level)
     if Data.IsOnQuest(q) then return true end
     local fix = ns.QuestFixes and ns.QuestFixes[q]
     if fix and fix.outOfPlan then return false end -- spec 023, R7
+    local finishers = (Data.Q.finishedBy(q) or {})[1]
+    if Util.FinishedOnlyBy(finishers, ns.OutOfPlanFinishers or {}) then return false end -- spec 023, R10
     if not excludedSort then buildExcludedSorts() end
     local zone = Data.Q.zoneOrSort(q) or 0
     if zone < 0 and excludedSort[zone] then return false end
@@ -653,15 +655,30 @@ end
 local CONTAINER, BAG, SOUL_BAG = 1, 0, 1
 
 -- R1: recompensa da classe recipiente, subclasse bolsa; para Warlock também bolsa de alma.
+-- R9: ou item de bônus de XP da tabela curada (terceiro retorno verdadeiro).
 function Data.IsBagQuest(q)
     local _, class = UnitClass("player")
+    local bonus = ns.XPBonusItems or {}
     for _, item in ipairs(Data.Rewards(q) or {}) do
+        if bonus[item] then return true, item, true end
         if Data.I.class(item) == CONTAINER then
             local sub = Data.I.subClass(item)
-            if sub == BAG or (sub == SOUL_BAG and class == "WARLOCK") then return true, item end
+            if sub == BAG or (sub == SOUL_BAG and class == "WARLOCK") then return true, item, false end
         end
     end
     return false
+end
+
+-- R7: quest de bolsa que o jogador dispensou (gravada por personagem).
+function Data.IsBagSkipped(q)
+    local skipped = ns.FP.db and ns.FP.db.bagSkipped
+    return skipped ~= nil and skipped[q] == true
+end
+
+-- R8: quest de bolsa que ainda vale como bolsa (proteção do R2 e marca do R3); 2º retorno: bônus de XP (R9).
+function Data.WantsBag(q)
+    local isBag, _, bonus = Data.IsBagQuest(q)
+    return isBag and not Data.IsBagSkipped(q), bonus == true
 end
 
 local function zoneName(mapID)
@@ -748,18 +765,43 @@ local function byLevelThenName(a, b)
 end
 
 -- R4 (spec 010): quests de bolsa que o personagem pode fazer, de qualquer zona.
--- { q, name, item, itemName, level, req, mapID, zone, status, starter, hasPre }
+-- { q, name, item, itemName, bonus, level, req, mapID, zone, status, starter, hasPre, skipped, step }
+-- R8 (emenda de 12/11/2026): a dispensada vai para o fim.
+local function bagOrder(a, b)
+    if a.skipped ~= b.skipped then return not a.skipped end
+    return byLevelThenName(a, b)
+end
+
+-- R10: primeiro passo da cadeia que leva a q (nil se a própria q, ou se o caminho está fechado).
+-- "Pode pegar" do passo: canTake, fora das categorias excluídas e do outOfPlan (spec 023, R7).
+local function stepTakeable(p, level)
+    local fix = ns.QuestFixes and ns.QuestFixes[p]
+    return canTake(p, level) and not Data.IsExcludedSort(p) and not (fix and fix.outOfPlan)
+end
+
+local function chainStep(q, level)
+    local Q = Data.Q
+    local start = ns.Leveling.ChainStart(q, function(p) return Q.preQuestSingle(p), Q.preQuestGroup(p) end,
+        completed, function(p) return stepTakeable(p, level) end)
+    if not start or start == q then return nil end
+    local e = questEntry(start, level)
+    if e.status == "depois de outra quest" then return nil end -- exclusiva, reputação: não ajuda
+    return e
+end
+
 function Data.BagQuests(level)
     local out = {}
     for q in pairs(Data.rewardsByQuest) do
-        local isBag, item = Data.IsBagQuest(q)
+        local isBag, item, bonus = Data.IsBagQuest(q)
         if isBag and not Data.IsExcludedSort(q) and canTake(q, level) then
             local e = questEntry(q, level)
-            e.item, e.itemName = item, Data.I.name(item)
+            e.item, e.itemName, e.bonus = item, Data.I.name(item), bonus or nil
+            e.skipped = Data.IsBagSkipped(q)
+            if e.status == "depois de outra quest" then e.step = chainStep(q, level) end
             out[#out + 1] = e
         end
     end
-    table.sort(out, byLevelThenName)
+    table.sort(out, bagOrder)
     return out
 end
 

@@ -19,6 +19,45 @@ ZoneContent.continent = {
     [16606] = 2997, -- Darkspear Islands
 }
 
+-- Spec 035, R6: zonas com divisa a pé (basta listar de um lado; Zones.Neighbors completa o outro).
+-- Fonte: mapa do jogo (Classic, o mesmo no Forever), 12/11/2026. ESTIMATIVA até conferir no jogo:
+-- Alterac > Western Plaguelands e as capitais são as mais incertas. Barco e zepelim não contam.
+ZoneContent.neighbors = {
+    -- Reinos do Leste
+    [85] = { 130, 28, 1497 },        -- Tirisfal: Silverpine, Western Plaguelands, Undercity
+    [130] = { 267 },                 -- Silverpine: Hillsbrad
+    [267] = { 36, 45, 47 },          -- Hillsbrad: Alterac, Arathi, Hinterlands
+    [36] = { 28 },                   -- Alterac: Western Plaguelands
+    [28] = { 139 },                  -- Western Plaguelands: Eastern Plaguelands
+    [45] = { 11 },                   -- Arathi: Wetlands
+    [11] = { 38 },                   -- Wetlands: Loch Modan
+    [38] = { 1, 3 },                 -- Loch Modan: Dun Morogh, Badlands
+    [1] = { 1537 },                  -- Dun Morogh: Ironforge
+    [3] = { 51 },                    -- Badlands: Searing Gorge
+    [51] = { 25 },                   -- Searing Gorge: Blackrock Mountain
+    [25] = { 46 },                   -- Blackrock Mountain: Burning Steppes
+    [46] = { 44 },                   -- Burning Steppes: Redridge
+    [44] = { 12, 10 },               -- Redridge: Elwynn, Duskwood
+    [12] = { 1519, 40, 10 },         -- Elwynn: Stormwind, Westfall, Duskwood
+    [10] = { 40, 41, 33 },           -- Duskwood: Westfall, Deadwind Pass, Stranglethorn
+    [41] = { 8 },                    -- Deadwind Pass: Swamp of Sorrows
+    [8] = { 4 },                     -- Swamp of Sorrows: Blasted Lands
+    -- Kalimdor
+    [14] = { 1637, 17 },             -- Durotar: Orgrimmar, Barrens
+    [17] = { 215, 406, 331, 400, 15 }, -- Barrens: Mulgore, Stonetalon, Ashenvale, Thousand Needles, Dustwallow
+    [215] = { 1638 },                -- Mulgore: Thunder Bluff
+    [406] = { 331, 405 },            -- Stonetalon: Ashenvale, Desolace
+    [331] = { 148, 361, 16 },        -- Ashenvale: Darkshore, Felwood, Azshara
+    [405] = { 357 },                 -- Desolace: Feralas
+    [357] = { 400 },                 -- Feralas: Thousand Needles
+    [400] = { 440 },                 -- Thousand Needles: Tanaris
+    [440] = { 490 },                 -- Tanaris: Un'Goro
+    [490] = { 1377 },                -- Un'Goro: Silithus
+    [361] = { 618, 493 },            -- Felwood: Winterspring, Moonglade
+    [618] = { 493 },                 -- Winterspring: Moonglade
+    [141] = { 1657 },                -- Teldrassil: Darnassus
+}
+
 -- Zonas cujas quests ficam fora do plano da facção: capitais inimigas (R8).
 ZoneContent.enemyCities = {
     Horde = { [1519] = true, [1537] = true, [1657] = true },     -- Stormwind, Ironforge, Darnassus

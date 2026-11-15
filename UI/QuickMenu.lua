@@ -13,6 +13,8 @@ local ITEMS = {
     { "Ponto de voo", function() ns.Planner.FollowFlightPoint() end, "Aponta a seta para o ponto de voo descoberto mais perto" },
     { "Armas", function() Menu.ShowWeapons() end, "Escolhe as armas que você usa e aponta a seta para o treinador" },
     { "Grupo", function() ns.Group.ShareAll() end, "Compartilha as quests do log com o grupo e manda um resumo do que falta" },
+    { "Calibração", function() ns.FP.PrintCalib() end,
+        "Mostra no chat o tempo por morte, o fator de XP e a tolerância de mobs altos, com a fonte (o mesmo que /fp calib)" },
     { "Limpar o log", function() Menu.ShowCleanup() end, "Mostra quests que não valem a pena; abandona só se você confirmar" },
     { "Reativar quests", function() ns.Planner.ConfirmClearUnavailable("menu +") end,
         "Desfaz as marcas de quest indisponível (pede confirmação). Não serve para atualizar: para isso, 'Recalcular rota'." },
