@@ -109,6 +109,14 @@ end
 ------------------------------------------------------------------------------------------
 -- Circuito de um hub
 ------------------------------------------------------------------------------------------
+-- Spec 039, R3: passos adiante da cadeia para quest que ainda vai ser pega; nil sem passos.
+local function chainAheadOf(q, level)
+    local D = ns.Data
+    if D.IsOnQuest(q) then return nil end
+    local a = D.ChainAhead(q, level)
+    return a.n > 0 and a or nil
+end
+
 local function questInfo(q, level, requires)
     local D = ns.Data
     local objectives, elite, dungeon = D.Objectives(q, level, ns.FP.MobXPFactor())
@@ -125,6 +133,7 @@ local function questInfo(q, level, requires)
         starters = D.StarterPoints(q), finishers = D.FinisherPoints(q),
         objectives = objectives, elite = elite, dungeon = dungeon, requires = requires,
         qLevel = D.Q.questLevel(q), -- spec 025
+        ahead = chainAheadOf(q, level), -- spec 039, R3
     }
 end
 
@@ -166,7 +175,7 @@ local function findSatellites(hub, hubs, level, player)
         if other ~= hub then
             local pickable = {}
             for _, q in ipairs(other.questList) do
-                if not D.IsOnQuest(q) and D.IsEligible(q, level) and D.IsRelevant(q, level) then
+                if not D.IsOnQuest(q) and D.IsEligible(q, level) and D.IsRelevantForChain(q, level) then
                     pickable[#pickable + 1] = q
                 end
             end
@@ -203,7 +212,7 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
     -- R1 (spec 006): quest do log só entra pelo logByHub (hub da entrega). Pelo hub de quem deu a
     -- quest, a entrega em outro mapa virava parada do circuito (ex.: "Sample for Helbrim", 11/11/2026).
     for _, q in ipairs(hub.questList) do
-        if not D.IsOnQuest(q) and D.IsEligible(q, level) and D.IsRelevant(q, level) then add(safeInfo(q, level)) end
+        if not D.IsOnQuest(q) and D.IsEligible(q, level) and D.IsRelevantForChain(q, level) then add(safeInfo(q, level)) end -- spec 039, R5
     end
     for _, q in ipairs(logByHub[hub.key] or {}) do add(safeInfo(q, level)) end
     -- Satélites (spec 008). R5: no hub seguido, o conjunto fica congelado.
@@ -244,7 +253,7 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
             local done = setmetatable({}, { __index = function(_, p) return D.IsCompleted(p) end })
             local requires, any = ns.Leveling.CircuitRequires(D.Q.preQuestSingle(q), D.Q.preQuestGroup(q),
                 nextOf[q], inCircuit, done) -- spec 002, R13a
-            if #requires > 0 and D.IsEligible(q, level, inCircuit) and D.IsRelevant(q, level) then
+            if #requires > 0 and D.IsEligible(q, level, inCircuit) and D.IsRelevantForChain(q, level) then
                 local info = safeInfo(q, level, requires)
                 if info then info.requiresAny = any end
                 add(info)
@@ -252,12 +261,19 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
         end
     end
     local c = ns.Leveling.BuildCircuit(list, player, params(), ns.Planner.Distance)
-    local names, keptSet = {}, {}
+    local names, keptSet, byID = {}, {}, {}
+    for _, info in ipairs(list) do byID[info.id] = info end
     for _, info in ipairs(list) do
         names[info.id] = info.name .. (info.requires and " (cont.)" or "") .. (info.satellite and " (no caminho)" or "")
             .. (info.bag and (info.bonusXP and " (bônus de XP)" or " (bolsa)") or "") .. (info.weapon and " (arma)" or "") .. (info.trainSkill and info.trainOn and (" (treine " .. info.trainSkill .. ")") or "")
     end
-    for _, k in ipairs(c.kept) do keptSet[k.id] = true end
+    for _, k in ipairs(c.kept) do
+        keptSet[k.id] = true
+        local info = k.byChain and byID[k.id]
+        if info and info.ahead then -- spec 039, R6
+            names[k.id] = names[k.id] .. string.format(" (cadeia: ~%s em %d passos, estimativa)", Util.FormatInt(math.floor(info.ahead.value)), info.ahead.n)
+        end
+    end
     c.names, c.satellites = names, {}
     for _, q in ipairs(satIDs) do if keptSet[q] then c.satellites[q] = true end end
     return c
@@ -443,8 +459,23 @@ function Guide.FollowBest(mode, quiet)
             Guide.Follow(best.key)
         elseif quiet then -- R19: sem hub na zona nova, o hub seguido continua
             ns.FP.Debug("zona: sem hub na zona nova; hub seguido mantido")
-        elseif mode == "turnin" then
-            ns.FP.Print("nenhuma quest pronta para entregar nesta zona.")
+        elseif mode == "turnin" then -- spec 035, R22: sem entrega na zona, a pronta mais perto de qualquer zona
+            local LG = ns.LevelGuide
+            local e = LG and LG.NearestTurnIn()
+            if not e then
+                ns.FP.Print("nenhuma quest pronta para entregar nesta zona.")
+                return
+            end
+            local how = e.plan and (ns.Travel.Describe(e.plan) .. " " .. LG.EstLabel(e.plan)) or "sem caminho calculado"
+            local trip = ns.Leveling.TurnInAction(e.plan) == "viagem"
+            local tail = trip and "; na chegada, use /fp entregar de novo" or ""
+            if e.zone == Guide.PlayerArea() then -- pronta na zona, mas fora dos circuitos (cidade sem hub)
+                ns.FP.Print(string.format("seguindo a entrega de %s (%s)%s", tostring(e.name), how, tail))
+            else
+                ns.FP.Print(string.format("nenhuma pronta nesta zona; seguindo a entrega de %s em %s (%s)%s", tostring(e.name),
+                    Guide.AreaName(e.zone), how, tail))
+            end
+            LG.FollowTurnIn(e, true)
         else
             ns.FP.Print("nenhum hub com circuito nesta zona.")
         end
@@ -484,6 +515,13 @@ local function chainAhead(q, mapID)
     return out
 end
 
+-- Spec 039, R7: taxa do bloco (a quest no log e os passos adiante); nil sem passos.
+local function chainRateOf(q, est, level)
+    local a = ns.Data.ChainAhead(q, level)
+    if a.n == 0 then return nil end
+    return ns.Leveling.ChainBlock(est, { a }).rate
+end
+
 function Guide.CleanupList(mapID)
     local D = ns.Data
     if not dataReady() then return {} end
@@ -507,7 +545,8 @@ function Guide.CleanupList(mapID)
                     rate = est.value / math.max(est.seconds, 1), hubRate = hubRate,
                     gray = level - qLevel >= GRAY_LEVELS,
                     classQuest = (D.Q.requiredClasses(k.id) or 0) ~= 0, bagReward = D.WantsBag(k.id),
-                    chainUpgrade = chainUpgrade, chainXP = chainXP, medianXP = D.medianXPByLevel[qLevel] }
+                    chainUpgrade = chainUpgrade, chainXP = chainXP, medianXP = D.medianXPByLevel[qLevel],
+                    chainRate = chainRateOf(k.id, est, level) } -- spec 039, R7
             end
         end
     end

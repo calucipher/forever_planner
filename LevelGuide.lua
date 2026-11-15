@@ -154,26 +154,23 @@ local function offerHub(o, map)
     return p and { mapID = p.mapID, x = p.x, y = p.y } or nil
 end
 
-local function deliveryZone(q)
-    local fin = ns.Data.FinisherPoints(q)[1]
+-- R21: o ponto de entrega mais perto do jogador, o mesmo que a seta usa.
+local function finisherOf(q, player)
+    local pts = ns.Data.FinisherPoints(q)
+    return pts[1] and ns.Planner.Nearest(player, pts) or nil
+end
+
+local function deliveryZone(q, player)
+    local fin = finisherOf(q, player)
     return fin and ns.Guide.MapZone(fin.mapID)
 end
 
 -- Zona de entrega das quests do log: { [zona] = n }.
-local function turnInsByZone()
+local function turnInsByZone(player)
     local out = {}
     for _, q in ipairs(ns.Data.LogQuests()) do
-        local zone = deliveryZone(q)
+        local zone = deliveryZone(q, player)
         if zone then out[zone] = (out[zone] or 0) + 1 end
-    end
-    return out
-end
-
-local function logItems()
-    local D, out = ns.Data, {}
-    for _, q in ipairs(D.LogQuests()) do
-        out[#out + 1] = { id = q, name = D.Q.name(q) or ("Quest " .. q), ready = D.IsReadyForTurnIn(q),
-            qLevel = D.Q.questLevel(q), zone = deliveryZone(q) }
     end
     return out
 end
@@ -182,6 +179,55 @@ local function copy(t)
     local c = {}
     for k, v in pairs(t) do c[k] = v end
     return c
+end
+
+-- R18 e R21: quests do log com a zona do ponto de entrega mais perto (o mesmo da seta) e, nas
+-- prontas, a viagem até ele (sem pedra em "Perto"). Devolve a lista e o índice por id.
+local function logItems(player, pw, nearSet, ctx, nearCtx)
+    local D, out, byId = ns.Data, {}, {}
+    for _, q in ipairs(D.LogQuests()) do
+        local fin = finisherOf(q, player)
+        local zone = fin and ns.Guide.MapZone(fin.mapID)
+        local it = { id = q, name = D.Q.name(q) or ("Quest " .. q), ready = D.IsReadyForTurnIn(q),
+            qLevel = D.Q.questLevel(q), zone = zone, point = fin }
+        if it.ready and zone and pw and ctx then
+            local fw = world(fin)
+            local plan = fw and ns.Travel.Plan(pw, fw, nearSet[zone] and nearCtx or ctx)
+            if plan then it.travel, it.plan = plan.seconds, plan end
+        end
+        out[#out + 1] = it
+        byId[q] = it
+    end
+    return out, byId
+end
+
+-- R18: a saída da Leveling.BeforeLeaving com o caminho e o ponto de entrega de volta.
+local function beforeLeaving(player, pw, L, nearSet, ctx, nearCtx)
+    local items, byId = logItems(player, pw, nearSet, ctx, nearCtx)
+    local list = ns.Leveling.BeforeLeaving(items, L, nearSet)
+    for _, e in ipairs(list) do
+        local it = byId[e.id]
+        if it then e.plan, e.point = it.plan, it.point end
+    end
+    return list
+end
+
+-- Contexto da viagem dos continentes da zona atual e das zonas do catálogo; o de "Perto" é sem pedra (R4).
+local function travelContexts(hereMap)
+    local D = ns.Data
+    local contMaps = { [ns.Planner.ContinentMap(hereMap) or 0] = true }
+    local cat = D.zoneCatalog
+    if cat then
+        for zone, z in pairs(cat.zones) do
+            local map = z.continent and D.areaToMap[zone]
+            if map then contMaps[ns.Planner.ContinentMap(map) or 0] = true end
+        end
+    end
+    contMaps[0] = nil
+    local ctx = LevelGuide.TravelContext(contMaps)
+    local nearCtx = copy(ctx)
+    nearCtx.hearth = nil
+    return ctx, nearCtx
 end
 
 -- Oferta da zona no nível L (spec 029): reaproveita a da sugestão de zona quando ela é do mesmo
@@ -211,18 +257,8 @@ function LevelGuide.Compute(yield)
     for _, z in ipairs(zones) do nearSet[z] = true end
 
     -- Contexto da viagem: continentes da zona atual e das candidatas.
-    local contMaps = { [ns.Planner.ContinentMap(hereMap) or 0] = true }
     local cat = D.zoneCatalog
-    if cat then
-        for zone, z in pairs(cat.zones) do
-            local map = z.continent and D.areaToMap[zone]
-            if map then contMaps[ns.Planner.ContinentMap(map) or 0] = true end
-        end
-    end
-    contMaps[0] = nil
-    local ctx = LevelGuide.TravelContext(contMaps)
-    local nearCtx = copy(ctx)
-    nearCtx.hearth = nil -- R4: em "Perto" a pedra nunca entra
+    local ctx, nearCtx = travelContexts(hereMap) -- R4: em "Perto" a pedra nunca entra
 
     -- 1. Perto
     local levelXP = Z.LevelXP(L)
@@ -250,7 +286,7 @@ function LevelGuide.Compute(yield)
     while #near > NEAR_MAX do table.remove(near) end
 
     -- 2. Antes de sair (só o que fica em "Perto"); 4. Volte depois
-    local before = ns.Leveling.BeforeLeaving(logItems(), L, nearSet)
+    local before = beforeLeaving(player, pw, L, nearSet, ctx, nearCtx)
     local comeBack = ns.Leveling.ComeBack(all)
     while #comeBack > COMEBACK_MAX do table.remove(comeBack) end
 
@@ -260,7 +296,7 @@ function LevelGuide.Compute(yield)
         local p = G.ZoneParams()
         local adv = G.ZoneAdvice()
         if not (adv and adv.level == L and adv.here == here) then adv = nil end
-        local turnIns = turnInsByZone()
+        local turnIns = turnInsByZone(player)
         local cands = {}
         for zone, z in pairs(cat.zones) do
             local map = D.areaToMap[zone]
@@ -300,10 +336,18 @@ local state = { key = nil, result = nil, running = false, pending = false, force
 function LevelGuide.Result() return state.result end
 
 -- Chave do cache: nível, entregas, zona, log, posição (quadrado de 5% do mapa) e pedra pronta.
+local function readyCount()
+    local n = 0
+    for _, q in ipairs(ns.Data.LogQuests()) do if ns.Data.IsReadyForTurnIn(q) then n = n + 1 end end
+    return n
+end
+
+-- R21: a chave inclui as prontas do log (a 5723 ficou pronta sem trocar nada do resto).
 local function cacheKey()
     local p = ns.Planner.PlayerPoint() or {}
     local h = hearth()
     return table.concat({ UnitLevel("player"), state.turnIns, tostring(ns.Guide.PlayerArea()), #ns.Data.LogQuests(),
+        readyCount(),
         tostring(ns.Data.zoneCatalog ~= nil), tostring(p.mapID), math.floor((p.x or 0) / 5), math.floor((p.y or 0) / 5),
         tostring(h and h.ready) }, ":")
 end
@@ -336,6 +380,18 @@ ns.FP.On("LEVEL_UP", function() C_Timer.After(1, maybe) end)
 ns.FP.On("ZONE", function() C_Timer.After(2, maybe) end)
 ns.FP.On("QUEST_TURNED_IN", function() state.turnIns = state.turnIns + 1; C_Timer.After(3, maybe) end)
 ns.FP.On("QUEST_ACCEPTED", function() C_Timer.After(2, maybe) end)
+-- R21: o log muda a cada mob; só recalcula quando muda o número de prontas (parecer, revisão 2).
+local logQueued, lastReady = false, nil
+ns.FP.On("QUEST_LOG", function()
+    if logQueued or not LevelGuide.watching then return end
+    logQueued = true
+    C_Timer.After(2, function()
+        logQueued = false
+        if not (ns.Data.Q and ns.Data.ready) then return end
+        local n = readyCount()
+        if n ~= lastReady then lastReady = n; maybe() end
+    end)
+end)
 
 ------------------------------------------------------------------------------------------
 -- Ações (R14, R17)
@@ -344,30 +400,68 @@ function LevelGuide.FollowTrip(t)
     ns.FP.AfterCombat("levelTrip", function()
         local leg = ns.Travel.FirstLeg(t.plan)
         local zoneName = ns.Guide.AreaName(t.zone)
+        local after = t.after or zoneName -- R20: na entrega, "entregar Quest"
+        local db = ns.FP.db
         if leg and leg.kind == "lar" then
-            ns.FP.Print("use a pedra de lar (" .. tostring(leg.label) .. "); depois clique de novo em " .. zoneName .. ".")
+            if t.questID then db.guide, db.following, ns.Guide.current = nil, nil, nil end -- parecer: o hub puxaria a seta
+            ns.FP.Print("use a pedra de lar (" .. tostring(leg.label) .. "); depois " .. (t.questID and "use /fp entregar de novo." or ("clique de novo em " .. zoneName .. ".")))
             return
         end
         local mapID, x, y, title
         if leg and leg.kind == "voar" and leg.from and leg.from.mapID then
             mapID, x, y = leg.from.mapID, leg.from.mx, leg.from.my
-            title = "Voar: " .. leg.label .. " · depois: " .. zoneName
+            title = "Voar: " .. leg.label .. " · depois: " .. after
         elseif leg and leg.kind == "transporte" and leg.mapPoint then
             mapID, x, y = leg.mapPoint.mapID, leg.mapPoint.x, leg.mapPoint.y
-            title = leg.label .. " · depois: " .. zoneName
+            title = leg.label .. " · depois: " .. after
         elseif t.dest then
-            mapID, x, y, title = t.dest.mapID, t.dest.x, t.dest.y, "Ir para " .. zoneName
+            mapID, x, y, title = t.dest.mapID, t.dest.x, t.dest.y, t.questID and after or ("Ir para " .. zoneName)
         end
         if not mapID then ns.FP.Print("não achei o ponto do primeiro trecho da viagem."); return end
         -- R17: o hub e a quest seguidos puxariam a seta de volta (como em Planner.Follow).
-        local db = ns.FP.db
         db.guide, db.following = nil, nil
         ns.Guide.current = nil
         ns.Gps.SetTarget(mapID, x, y, title)
-        ns.FP.Print("viagem: " .. zoneName .. " — " .. ns.Travel.Describe(t.plan) .. " " .. LevelGuide.EstLabel(t.plan))
-        ns.FP.Fire("FOLLOW", "trip", t.zone, t.eff) -- spec 036, R9
+        if t.questID then
+            ns.FP.Fire("FOLLOW", "entrega", t.questID) -- R20: no diário, a entrega e não "trip"
+        else
+            ns.FP.Print("viagem: " .. zoneName .. " — " .. ns.Travel.Describe(t.plan) .. " " .. LevelGuide.EstLabel(t.plan))
+            ns.FP.Fire("FOLLOW", "trip", t.zone, t.eff) -- spec 036, R9
+        end
         ns.FP.Fire("CHANGED")
     end)
+end
+
+-- R20: segue a entrega de uma linha de "Antes de sair" (ou da R22, com quiet: ela avisa no chat).
+-- Devolve "seguir" ou "viagem".
+function LevelGuide.FollowTurnIn(e, quiet)
+    local action = ns.Leveling.TurnInAction(e.plan)
+    if action == "seguir" then
+        ns.Planner.Follow(e.id)
+    else
+        if not quiet then
+            ns.FP.Print(string.format("entrega de %s em %s: %s %s; na chegada, use /fp entregar", tostring(e.name),
+                ns.Guide.AreaName(e.zone), ns.Travel.Describe(e.plan), LevelGuide.EstLabel(e.plan)))
+        end
+        LevelGuide.FollowTrip({ plan = e.plan, zone = e.zone, dest = e.point, questID = e.id,
+            after = "entregar " .. tostring(e.name) })
+    end
+    return action
+end
+
+-- R22: a entrega pronta mais perto, de qualquer zona, calculada na hora (sem a aba aberta).
+function LevelGuide.NearestTurnIn()
+    local D, G = ns.Data, ns.Guide
+    if not (D.Q and D.ready) then return nil end
+    local here, hereMap = G.PlayerArea()
+    local player = ns.Planner.PlayerPoint() or { mapID = hereMap }
+    local nearSet = {}
+    if here then
+        nearSet[here] = true
+        for _, z in ipairs(ns.Zones.Neighbors(here, ns.ZoneContent.neighbors)) do nearSet[z] = true end
+    end
+    local ctx, nearCtx = travelContexts(hereMap)
+    return ns.Leveling.NearestReady(beforeLeaving(player, world(player), UnitLevel("player"), nearSet, ctx, nearCtx))
 end
 
 return LevelGuide

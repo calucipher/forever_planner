@@ -5,10 +5,10 @@
 Addon de leveling para **World of Warcraft: Forever** (Classic+, interface 16001).
 Pensado para Warlock Undead, mas funciona pra qualquer classe e raça.
 
-- **Guia**: ranking dos *hubs* da zona por XP/hora. Cada hub vira um circuito: pegar todas as quests, fazer os objetivos na ordem de menor deslocamento e entregar tudo. Conta o XP dos mobs, o tempo parado e o rested. Quest fraca sai do circuito, a não ser que libere uma cadeia. Elite e dungeon ficam à parte.
-- **Level**: hubs para o seu nível perto de você (zona atual e vizinhas), o que resolver antes de sair e se vale a viagem para outro mapa, com o tempo real do caminho (a pé, voo, zepelim ou barco, pedra de lar). Hub alto demais aparece como "volte no nível N". Você escolhe e segue.
+- **Guia**: ranking dos *hubs* da zona por XP/hora. Cada hub vira um circuito: pegar todas as quests, fazer os objetivos na ordem de menor deslocamento e entregar tudo. Conta o XP dos mobs, o tempo parado e o rested. Quest fraca sai do circuito, a não ser que libere uma cadeia: a cadeia é avaliada como um bloco, pelo XP de todos os passos. Elite e dungeon ficam à parte.
+- **Level**: hubs para o seu nível perto de você (zona atual e vizinhas), o que resolver antes de sair (inclusive quest pronta com entrega em outra zona, com o caminho) e se vale a viagem para outro mapa, com o tempo real do caminho (a pé, voo, zepelim ou barco, pedra de lar). Hub alto demais aparece como "volte no nível N". Você escolhe e segue.
 - **Quests**: ranking das quests da zona, uma a uma, por *valor ÷ tempo*. O valor é XP da quest, XP dos mobs e upgrade de equipamento (com teto de 25%).
-- **GPS**: aponta onde ir (pegar → objetivo → entregar). Usa uma seta na tela com distância, o pino nativo do mapa e o TomTom, se estiver instalado. A pé, a seta segue a estrada em vez da linha reta.
+- **GPS**: aponta onde ir (pegar → objetivo → entregar). Usa uma seta na tela com distância, o pino nativo do mapa e o TomTom, se estiver instalado. A pé, a seta segue a estrada em vez da linha reta. Quando o alvo está dentro de uma caverna, a seta leva até a entrada.
 - **Macros**: leveling e avançadas para Warlock, Warrior, Mage e Druid, feitas para repeat (ex.: Razer Naga): alvo automático só em combate, listas de prioridade e `/castsequence`, criadas com 1 clique. Canalizados e controle vêm marcados "sem repeat". Dica para o spam: `/console Sound_EnableErrorSpeech 0` corta a voz de "não está pronto". O texto usa os nomes do seu client e só os feitiços que você conhece; quando você aprende um feitiço, as macros já criadas se atualizam sozinhas.
 - **Procurar grupo**: na aba Buscar do LFG, um painel ao lado lista os grupos do seu nível primeiro. "Chamar" abre o whisper do líder com o texto pronto (classe, nível, papel e atividade): é só apertar Enter. O painel marca quem você já chamou.
 - **Builds**: talentos por faixa de nível, pesos de atributo editáveis, Legacy e dicas de rota.
@@ -51,7 +51,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 |---|---|
 | `/fp` | Abre ou fecha o painel (ou clique no botão do minimapa) |
 | `/fp minimapa` | Esconde ou mostra o botão do minimapa |
-| `/fp entregar` | GPS segue o hub mais perto com quests prontas para entregar |
+| `/fp entregar` | GPS segue o hub mais perto com quests prontas para entregar; sem nenhuma na zona, segue a entrega pronta mais perto de qualquer zona |
 | `/fp limpar` | Lista as quests do log que não valem a pena e abandona só se você confirmar |
 | `/fp bolsa` | Segue a melhor quest que dá bolsa (zona atual primeiro, depois menor nível) |
 | `/fp bolsas` | Lista as quests de bolsa do personagem: zona, nível e situação |

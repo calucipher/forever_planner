@@ -46,7 +46,7 @@ FP.defaults = {
     runSpeed = 7,               -- jardas/s a pé
     showOnlyCurrentZone = true,
     autoNext = true,            -- ao entregar a quest seguida, segue a próxima melhor
-    gps = { arrow = true, native = true, tomtom = true, roads = true, arriveYards = 12, x = 0, y = -160 },
+    gps = { arrow = true, native = true, tomtom = true, roads = true, caves = true, arriveYards = 12, x = 0, y = -160 },
     ui = { point = "CENTER", x = 0, y = 0, tab = "quests" },
     cache = { xp = {}, money = {} }, -- recompensas reais vistas no diálogo de quest
     following = nil,            -- questID seguido pelo GPS
@@ -495,6 +495,23 @@ SlashCmdList.FOREVERPLANNER = function(msg)
         ns.ClassGuide.Follow()
     elseif cmd == "armas" then
         ns.QuickMenu.ShowWeapons()
+    elseif cmd == "entradas" then -- spec 038, R8
+        local caves = ns.Gps.LearnedCaves()
+        if rest == "limpar" then
+            for c in pairs(caves) do caves[c] = nil end
+            ns.Gps.UpdateDoor()
+            FP.Print("entradas aprendidas apagadas.")
+        else
+            local n = 0
+            for _, list in pairs(caves) do
+                for _, e in ipairs(list) do
+                    n = n + 1
+                    FP.Print(string.format("%s · mapa %s · %s, %s · %d pontos", tostring(e.name or "?"), tostring(e.m or "?"),
+                        tostring(e.mx or "?"), tostring(e.my or "?"), #(e.pts or {}) / 2))
+                end
+            end
+            if n == 0 then FP.Print("nenhuma entrada aprendida ainda. Entre numa caverna andando.") end
+        end
     elseif cmd == "indisponiveis" then
         if rest == "limpar" then
             ns.Planner.ClearUnavailable("/fp indisponiveis limpar")
@@ -544,6 +561,6 @@ SlashCmdList.FOREVERPLANNER = function(msg)
     elseif cmd == "ttk" and tonumber(rest) then
         FP.db.ttk = tonumber(rest); FP.Fire("CHANGED"); FP.Print("TTK:", FP.db.ttk, "s")
     else
-        FP.Print("comandos: /fp, /fp guia, /fp next, /fp clear, /fp preset <nome>, /fp stats <link>, /fp ttk <seg>, /fp agressividade <0-100>, /fp calib, /fp macros, /fp minimapa, /fp auto, /fp grupo [avisos], /fp entregar, /fp limpar, /fp debug [chat], /fp diag, /fp bolsa, /fp bolsas, /fp classe, /fp marcos, /fp armas, /fp indisponiveis [limpar], /fp diario [on|off|limpar], /fp lfg [texto|solo|padrao|copiar]")
+        FP.Print("comandos: /fp, /fp guia, /fp next, /fp clear, /fp preset <nome>, /fp stats <link>, /fp ttk <seg>, /fp agressividade <0-100>, /fp calib, /fp macros, /fp minimapa, /fp auto, /fp grupo [avisos], /fp entregar, /fp limpar, /fp debug [chat], /fp diag, /fp bolsa, /fp bolsas, /fp classe, /fp marcos, /fp armas, /fp indisponiveis [limpar], /fp entradas [limpar], /fp diario [on|off|limpar], /fp lfg [texto|solo|padrao|copiar]")
     end
 end

@@ -835,6 +835,77 @@ function Data.NextInChain(q)
     return (n and n > 0) and n or nil
 end
 
+------------------------------------------------------------------------------------------
+-- Valor da cadeia (spec 039)
+------------------------------------------------------------------------------------------
+local chainCache, stepCache = {}, {}
+local function clearChainCache() chainCache, stepCache = {}, {} end
+ns.FP.On("QUEST_TURNED_IN", clearChainCache)
+ns.FP.On("LEVEL_UP", clearChainCache)
+ns.FP.On("ZONE_CATALOG", function() clearChainCache(); if ns.Guide then ns.Guide.Invalidate() end end) -- dependentes chegam com o catálogo
+
+local function inGroup() return _G.IsInGroup ~= nil and _G.IsInGroup() == true end
+
+-- Próximos de um passo: a seguinte da cadeia e quem tem o passo como pré-requisito (catálogo).
+local function chainNext(id)
+    local out, seen = {}, {}
+    local n = Data.NextInChain(id)
+    if n then out[1] = n; seen[n] = true end
+    local cat = Data.zoneCatalog
+    for _, c in ipairs(cat and cat.children and cat.children[id] or {}) do
+        if not seen[c] then seen[c] = true; out[#out + 1] = c end
+    end
+    return out
+end
+
+-- Passo como o circuito vê uma quest (xp, dinheiro, objetivos, masmorra), com cache por nível.
+local function chainStepInfo(id, L)
+    local key = id .. ":" .. L
+    if stepCache[key] then return stepCache[key] end
+    local objectives, _, dungeon = Data.Objectives(id, L, ns.FP.MobXPFactor and ns.FP.MobXPFactor() or 1)
+    local s = { id = id, xp = (Data.QuestXP(id, L)), money = Data.QuestMoney(id), objectives = objectives,
+        dungeon = dungeon, state = "pegar", level = Data.Q.questLevel(id), done = Data.IsCompleted(id) }
+    -- R1 (emenda): fora do plano (spec 023) para a busca. No nível da própria quest, cinza e alta não contam.
+    s.skip = not Data.IsRelevant(id, s.level or L)
+    stepCache[key] = s
+    return s
+end
+
+local function chainParams(L)
+    local db = ns.FP.db
+    return { ttk = ns.FP.KillSeconds and ns.FP.KillSeconds() or 10, downtime = 0, goldToXP = db.goldToXP,
+        playerLevel = L, speed = db.runSpeed or 7 }
+end
+
+-- R3: passos adiante de q no nível L, com valor e tempo. p: parâmetros do circuito (opcional).
+function Data.ChainAhead(q, L, p)
+    local group = inGroup()
+    local key = q .. ":" .. L .. ":" .. tostring(group)
+    if chainCache[key] then return chainCache[key] end
+    local ids = ns.Leveling.ChainWalk(q, chainNext, function(id) return chainStepInfo(id, L) end, L, { group = group })
+    p = p or chainParams(L)
+    local value, seconds = 0, 0
+    for _, id in ipairs(ids) do
+        local v, s = ns.Leveling.StepEstimate(chainStepInfo(id, L), p)
+        value, seconds = value + v, seconds + s
+    end
+    local r = { ids = ids, n = #ids, value = value, seconds = seconds }
+    chainCache[key] = r
+    return r
+end
+
+-- R5: relevante para o circuito, ou cinza com algum passo adiante não cinza.
+function Data.IsRelevantForChain(q, level)
+    if Data.IsRelevant(q, level) then return true end
+    local qLevel = Data.Q.questLevel(q) or 0
+    if not (qLevel > 0 and level - qLevel >= 10) or not Data.IsRelevant(q, qLevel) then return false end
+    for _, id in ipairs(Data.ChainAhead(q, level).ids) do
+        local l = Data.Q.questLevel(id) or 0
+        if l > 0 and level - l < 10 then return true end
+    end
+    return false
+end
+
 local LOG_SIZE = 40 -- Forever: log de 40 quests
 function Data.LogFree()
     if not C_QuestLog.GetNumQuestLogEntries then return LOG_SIZE end

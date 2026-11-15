@@ -77,11 +77,21 @@ local function build(panel)
         for _, b in ipairs(res.before) do
             local color = b.reason == "entregar" and "FF73E65A" or "FFFFD14D"
             local loss = b.loss and string.format(" (−%d%% do XP)", math.floor(b.loss * 100 + 0.5)) or ""
-            out[#out + 1] = { text = string.format("  %s  |c%s%s%s|r  |cFF888888%s|r", b.name, color, b.reason, loss,
-                b.zone and G.AreaName(b.zone) or ""), action = function() ns.Planner.Follow(b.id) end,
-                tip = { b.name, b.reason == "entregar" and "Pronta para entregar." or
-                    ("Se você subir de nível antes de entregar, ela rende menos XP (" .. b.reason .. ").") },
-                hint = "Clique: seguir esta quest" }
+            local where = b.zone and G.AreaName(b.zone) or ""
+            local tip = { b.name, b.reason == "entregar" and "Pronta para entregar." or
+                ("Se você subir de nível antes de entregar, ela rende menos XP (" .. b.reason .. ").") }
+            if b.far and b.plan then -- emenda R20: entrega fora de "Perto", com o caminho
+                where = where .. " · " .. ns.Travel.Describe(b.plan) .. " " .. LG.EstLabel(b.plan)
+                for _, s in ipairs(b.plan.steps) do
+                    tip[#tip + 1] = string.format("· %s%s ~%d min", s.kind, s.label and (" " .. s.label) or "", minutes(s.seconds))
+                end
+            end
+            local trip = b.reason == "entregar" and ns.Leveling.TurnInAction(b.plan) == "viagem"
+            out[#out + 1] = { text = string.format("  %s  |c%s%s%s|r  |cFF888888%s|r", b.name, color, b.reason, loss, where),
+                action = function()
+                    if b.reason == "entregar" then LG.FollowTurnIn(b) else ns.Planner.Follow(b.id) end
+                end,
+                tip = tip, hint = trip and "Clique: seta no primeiro trecho da viagem" or "Clique: seguir esta quest" }
         end
         if #res.before == 0 then empty("nada para resolver antes") end
         gap()

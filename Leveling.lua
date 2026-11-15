@@ -178,11 +178,18 @@ function Leveling.SelectQuests(entries, threshold)
     local totalV, totalS = 0, 0
     for _, e in ipairs(entries) do totalV = totalV + e.value; totalS = totalS + e.seconds end
     local avg = totalS > 0 and totalV / totalS or 0
-    local weak = {}
+    local weak, cut = {}, (threshold or 0) * avg
     for _, e in ipairs(entries) do
         -- Spec 029, R1: `unlock` (XP que a quest destrava) entra no corte, não na média.
         local rate = e.seconds > 0 and (e.value + (e.unlock or 0)) / e.seconds or huge
-        if not e.locked and rate < (threshold or 0) * avg then weak[e.id] = true end
+        -- Spec 039, R4: com passos adiante, vale a taxa do bloco (valor e tempo da cadeia).
+        local a = e.ahead
+        if a and (a.seconds or 0) + e.seconds > 0 then
+            local block = (e.value + (e.unlock or 0) + (a.value or 0)) / (e.seconds + (a.seconds or 0))
+            if not e.locked and rate < cut and block >= cut then e.byChain = true end
+            rate = math.max(rate, block)
+        end
+        if not e.locked and rate < cut then weak[e.id] = true end
     end
     for _, e in ipairs(entries) do
         if not weak[e.id] then
@@ -504,7 +511,8 @@ function Leveling.BuildCircuit(quests, start, p, dist)
     for _, q in ipairs(candidates) do
         local value, seconds = ownEstimate(q, p)
         entries[#entries + 1] = { id = q.id, value = value, seconds = seconds, requires = q.requires, quest = q,
-            locked = q.state ~= "pegar" or q.bag } -- R34: o que já está no log não sai; spec 010: bolsa
+            locked = q.state ~= "pegar" or q.bag, -- R34: o que já está no log não sai; spec 010: bolsa
+            ahead = q.state == "pegar" and q.ahead or nil } -- spec 039, R4: passos adiante da cadeia
     end
     local kept, dropped = Leveling.SelectQuests(entries, p.threshold or 0)
     for _, e in ipairs(dropped) do aside[#aside + 1] = { id = e.id, reason = "abaixo do limiar" } end
@@ -623,7 +631,7 @@ function Leveling.BuildCircuit(quests, start, p, dist)
     local value = base + (p.goldToXP or 0) * money / 100 + upgradeXP
 
     local keptQuests, estimates = {}, {}
-    for _, e in ipairs(kept) do keptQuests[#keptQuests + 1] = { id = e.id, chain = e.chain, state = e.quest.state } end
+    for _, e in ipairs(kept) do keptQuests[#keptQuests + 1] = { id = e.id, chain = e.chain, state = e.quest.state, byChain = e.byChain } end
     for _, e in ipairs(entries) do estimates[e.id] = { value = e.value, seconds = e.seconds } end
     return {
         stops = stops, kept = keptQuests, aside = aside, legs = legs, estimates = estimates,
@@ -710,27 +718,56 @@ function Leveling.ChainStart(q, pre, done, takeable, seen)
     return q
 end
 
--- Spec 035, R7: o que resolver antes de sair. items = { { id, name, ready, qLevel, zone } } do log;
--- nearZones = { [zona] = true } de "Perto" (entrega em outra zona conta como entrega da viagem).
--- Pronta: "entregar". Não pronta que perde XP se subir de nível antes: "perde XP no nível L+1", com loss.
-function Leveling.BeforeLeaving(items, L, nearZones)
-    local ready, losing = {}, {}
+-- Spec 035, R7 e R18: o que resolver antes de sair. items = { { id, name, ready, qLevel, zone, travel } }
+-- do log; nearZones = { [zona] = true } de "Perto". Prontas ("entregar") de qualquer zona, as de fora
+-- de "Perto" com far (até farMax), em ordem de travel (sem travel por último; empate pela posição no
+-- log). Depois as de "Perto" que perdem XP se subir de nível antes: "perde XP no nível L+1", com loss.
+function Leveling.BeforeLeaving(items, L, nearZones, farMax)
+    farMax = farMax or 5
+    local ready, far, losing = {}, {}, {}
     local falloff = ns.Util.XPFalloff
-    for _, it in ipairs(items or {}) do
-        if it.zone and nearZones and nearZones[it.zone] then
-            if it.ready then
-                ready[#ready + 1] = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel, reason = "entregar" }
-            elseif it.qLevel then
-                local now, next = falloff(L, it.qLevel), falloff(L + 1, it.qLevel)
-                if next < now then
-                    losing[#losing + 1] = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel,
-                        reason = "perde XP no nível " .. (L + 1), loss = now - next }
-                end
+    for i, it in ipairs(items or {}) do
+        local isNear = it.zone and nearZones and nearZones[it.zone]
+        if it.zone and it.ready then
+            local e = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel, reason = "entregar",
+                travel = it.travel, far = (not isNear) or nil, pos = i }
+            if isNear then ready[#ready + 1] = e else far[#far + 1] = e end
+        elseif isNear and it.qLevel then
+            local now, next = falloff(L, it.qLevel), falloff(L + 1, it.qLevel)
+            if next < now then
+                losing[#losing + 1] = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel,
+                    reason = "perde XP no nível " .. (L + 1), loss = now - next }
             end
         end
     end
+    local function byTravel(a, b)
+        local ta, tb = a.travel or math.huge, b.travel or math.huge
+        if ta ~= tb then return ta < tb end
+        return a.pos < b.pos
+    end
+    table.sort(far, byTravel)
+    for i = #far, farMax + 1, -1 do far[i] = nil end
+    for _, e in ipairs(far) do ready[#ready + 1] = e end
+    table.sort(ready, byTravel)
+    for _, e in ipairs(ready) do e.pos = nil end
     for _, e in ipairs(losing) do ready[#ready + 1] = e end
     return ready
+end
+
+-- Spec 035, R19: a entrega pronta mais perto (a primeira "entregar" da saída da R18).
+function Leveling.NearestReady(list)
+    for _, e in ipairs(list or {}) do
+        if e.reason == "entregar" then return e end
+    end
+    return nil
+end
+
+-- Spec 035, R20: com transporte ou pedra de lar no caminho, a seta não leva sozinha (outro continente).
+function Leveling.TurnInAction(plan)
+    for _, s in ipairs(plan and plan.steps or {}) do
+        if s.kind == "transporte" or s.kind == "lar" then return "viagem" end
+    end
+    return "seguir"
 end
 
 -- Spec 035, R16: XP/h efetivo de um hub. Hub com pouco XP no total acaba logo e rende menos.
@@ -758,6 +795,55 @@ function Leveling.ComeBack(rows)
     return out
 end
 
+------------------------------------------------------------------------------------------
+-- Valor da cadeia (spec 039)
+------------------------------------------------------------------------------------------
+Leveling.CHAIN_STEPS = 5
+Leveling.DUNGEON_STEP_SECONDS = 900 -- estimativa: a parte de uma quest numa ida à masmorra
+
+-- R1: passos adiante de q, em largura. nextOf(id) → ids; infoOf(id) → { level, dungeon, done }.
+function Leveling.ChainWalk(q, nextOf, infoOf, L, opts)
+    local maxDepth = opts and opts.steps or Leveling.CHAIN_STEPS
+    local group = opts and opts.group
+    local out, seen, frontier = {}, { [q] = true }, { q }
+    for _ = 1, maxDepth do
+        local nextFrontier = {}
+        for _, cur in ipairs(frontier) do
+            for _, n in ipairs(nextOf(cur) or {}) do
+                if not seen[n] then
+                    seen[n] = true
+                    local i = infoOf(n) or {}
+                    local stop = i.skip or (i.dungeon and not group) or (i.level and i.level > L + Leveling.MAX_LEVELS_ABOVE)
+                    if not stop then
+                        if not i.done then out[#out + 1] = n end
+                        nextFrontier[#nextFrontier + 1] = n
+                    end
+                end
+            end
+        end
+        frontier = nextFrontier
+        if not frontier[1] then break end
+    end
+    return out
+end
+
+-- R2: bloco = a quest mais os passos adiante. own e steps = { value, seconds }.
+function Leveling.ChainBlock(own, steps)
+    local value, seconds = own.value or 0, own.seconds or 0
+    for _, s in ipairs(steps or {}) do
+        value, seconds = value + (s.value or 0), seconds + (s.seconds or 0)
+    end
+    return { value = value, seconds = seconds, rate = seconds > 0 and value / seconds or 0, n = #(steps or {}) }
+end
+
+-- R3: valor e tempo de um passo adiante, com a mesma conta do circuito.
+-- Emenda: cada passo paga um deslocamento desconhecido (UNKNOWN_LEG), como o circuito paga as pernas.
+function Leveling.StepEstimate(q, p)
+    if q.dungeon then return (q.xp or 0) + (p.goldToXP or 0) * (q.money or 0) / 100, Leveling.DUNGEON_STEP_SECONDS end
+    local value, seconds = ownEstimate(q, p)
+    return value, seconds + Leveling.UNKNOWN_LEG / (p.speed or 7)
+end
+
 -- item = { id, classQuest, chainUpgrade, chainXP, medianXP }
 function Leveling.Protected(item)
     if item.classQuest or item.chainUpgrade or item.bagReward then return true end -- bagReward: spec 010
@@ -771,7 +857,9 @@ end
 function Leveling.CleanupCandidates(items, threshold)
     local out = {}
     for _, it in ipairs(items) do
-        if it.incomplete and not Leveling.Protected(it) then
+        -- Spec 039, R7: o bloco da cadeia rende o bastante: não sugere abandonar.
+        local chainOk = it.chainRate and (it.hubRate or 0) > 0 and it.chainRate >= (threshold or 0) * it.hubRate
+        if it.incomplete and not chainOk and not Leveling.Protected(it) then
             local weak = (it.hubRate or 0) > 0 and (it.rate or 0) < (threshold or 0) * it.hubRate
             if it.gray or weak then out[#out + 1] = { id = it.id, reason = it.gray and "cinza" or "rende pouco" } end
         end

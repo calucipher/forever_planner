@@ -120,6 +120,87 @@ end
 local ROAD = { minDist = 400, maxAccess = 150, factor = 1.6, ahead = 30, offRoute = 60 }
 Gps.road = nil -- caminho de Roads.Path + dest, para o trecho a pé (até o alvo ou o ponto de voo)
 
+------------------------------------------------------------------------------------------
+-- Entrada de caverna (spec 038)
+------------------------------------------------------------------------------------------
+Gps.door = nil -- entrada por onde a seta passa (Caves.Door), sem trecho de voo
+local LEARN_EVERY = 0.5
+local learnState = {}
+local seedCache -- lista da Content/Caves.lua em jardas do mundo (convertida uma vez)
+
+-- Entradas aprendidas, na conta (ForeverPlannerWorld). Lido na hora: o SavedVariables chega no login.
+local function learnedCaves()
+    local W = _G.ForeverPlannerWorld
+    if type(W) ~= "table" then W = {}; _G.ForeverPlannerWorld = W end
+    W.caves = W.caves or {}
+    return W.caves
+end
+Gps.LearnedCaves = learnedCaves
+
+local function toWorld(mapID, x, y)
+    local cont, pos = C_Map.GetWorldPosFromMapPos(mapID, CreateVector2D(x / 100, y / 100))
+    if not pos then return nil end
+    local wx, wy = pos:GetXY()
+    return cont, wx, wy
+end
+
+local function caveList()
+    if not seedCache and C_Map.GetWorldPosFromMapPos and CreateVector2D then
+        local ok, seeds = pcall(ns.Caves.Seeds, ns.CaveSeeds, toWorld)
+        if not ok then ns.FP.Debug("gps: lista de cavernas descartada: " .. tostring(seeds)) end
+        seedCache = ok and seeds or {}
+    end
+    return ns.Caves.Merge(learnedCaves(), seedCache)
+end
+
+local function indoors() return (_G.IsIndoors and _G.IsIndoors()) and true or false end
+
+-- R4/R8: refaz a entrada. Com trecho de voo, desligado ou sem posição: sem entrada.
+local function doorKey(d) return d and string.format("%s:%.0f:%.0f", tostring(d.exit), d.x, d.y) or "" end
+function Gps.UpdateDoor()
+    local t, door = Gps.target, nil
+    if t and t.world and not Gps.leg and ns.FP.db.gps.caves ~= false then
+        local cont, px, py = playerWorld()
+        if cont then
+            local ok, d = pcall(ns.Caves.Door, caveList(), { c = cont, x = px, y = py, indoors = indoors() },
+                { c = t.world[1], x = t.world[2], y = t.world[3] }, { arrive = ns.FP.db.gps.arriveYards })
+            if not ok then ns.FP.Debug("gps: entrada descartada: " .. tostring(d)) end
+            door = ok and d or nil
+        end
+    end
+    local changed = doorKey(door) ~= doorKey(Gps.door)
+    Gps.door = door
+    if changed then
+        ns.FP.Debug(door and string.format("gps: %s %s", door.exit and "saída" or "entrada", tostring(door.name)) or "gps: sem entrada")
+    end
+    return changed
+end
+
+-- R1/R2/R9: amostra do jogador para aprender entradas; em taxi, morto ou sem posição, esquece.
+local function learnTick()
+    local cont, px, py = playerWorld()
+    local s
+    if cont and not (_G.UnitOnTaxi and _G.UnitOnTaxi("player")) and not (_G.UnitIsDeadOrGhost and _G.UnitIsDeadOrGhost("player")) then
+        local mapID = C_Map.GetBestMapForUnit("player")
+        local pos = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
+        local mx, my
+        if pos then mx, my = pos:GetXY() end
+        if mx and Util.IsSecret(mx) then mx, my = nil, nil end
+        local name = _G.GetSubZoneText and _G.GetSubZoneText()
+        if name == "" or Util.IsSecret(name) then name = nil end
+        s = { c = cont, x = px, y = py, indoors = indoors(), m = mapID,
+            mx = mx and math.floor(mx * 1000 + 0.5) / 10, my = my and math.floor(my * 1000 + 0.5) / 10, name = name }
+    end
+    local flipped = ns.Caves.Learn(learnedCaves(), learnState, s)
+    if flipped and Gps.target and Gps.UpdateDoor() then Gps.RefreshWaypoint() end
+end
+ns.FP.On("READY", function()
+    if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(LEARN_EVERY, function()
+        local ok, err = pcall(learnTick)
+        if not ok then ns.FP.Debug("gps: aprendizado de entrada falhou: " .. tostring(err)) end
+    end) end
+end)
+
 -- R11/R12/R13: caminho para o trecho a pé; reaproveita o atual se o destino não mudou.
 local function planRoad()
     local t = Gps.target
@@ -128,8 +209,9 @@ local function planRoad()
     local graphs = ns.RoadGraphs
     local cont, px, py = playerWorld()
     if not (graphs and cont and cont == t.world[1] and graphs[cont]) then return nil end
-    local leg = Gps.leg
-    local dest = leg and { x = leg.from.x, y = leg.from.y } or { x = t.world[2], y = t.world[3] }
+    local leg, door = Gps.leg, Gps.door
+    local dest = leg and { x = leg.from.x, y = leg.from.y } or door and { x = door.x, y = door.y }
+        or { x = t.world[2], y = t.world[3] } -- spec 038, R5: a estrada termina na entrada
     local cur = Gps.road
     if cur and cur.dest.x == dest.x and cur.dest.y == dest.y then return cur end
     if InCombatLockdown() then return nil end -- constituição 6: nada pesado em combate
@@ -160,7 +242,10 @@ function Gps.ShownTitle()
     local t = Gps.target
     if not t then return nil end
     local leg = Gps.leg
-    if not leg then return t.title end
+    if not leg then
+        if Gps.door then return ns.Caves.Title(Gps.door, t.title) end -- spec 038, R6
+        return t.title
+    end
     return string.format("Voar: %s > %s · depois: %s", tostring(leg.from.name), tostring(leg.to.name), tostring(t.title))
 end
 
@@ -245,9 +330,19 @@ function Gps.UpdateArrow(f)
     if cont ~= t.world[1] then f.dist:SetText("outro continente"); return end
     -- R3: a chegada é sempre no alvo final; a seta aponta para o ponto de voo se houver trecho.
     local _, dist = Gps.Relative(px, py, t.world[2], t.world[3], facing)
-    local leg = Gps.leg
+    local leg, door = Gps.leg, Gps.door
     local aimX, aimY = t.world[2], t.world[3]
-    if leg then aimX, aimY = leg.from.x, leg.from.y end
+    if leg then aimX, aimY = leg.from.x, leg.from.y
+    elseif door then -- spec 038, R5: mira a entrada; ao chegar nela, refaz (dentro, a seta vai ao alvo)
+        local _, doorDist = Gps.Relative(px, py, door.x, door.y, facing)
+        local now = _G.GetTime and _G.GetTime() or 0
+        if doorDist <= (ns.FP.db.gps.arriveYards or 12) and now - (t.doorAt or 0) >= LEARN_EVERY then
+            t.doorAt = now
+            if Gps.UpdateDoor() then Gps.RefreshWaypoint() end
+        end
+        door = Gps.door
+        if door then aimX, aimY = door.x, door.y end
+    end
     -- Spec 034, R9/R10: com caminho, mira 30 jd à frente nele; longe dele, descarta e o ticker replaneja.
     local road, distText = Gps.road, nil
     if road then
@@ -305,7 +400,10 @@ showWaypoint = function()
     if not t then return end
     local db = ns.FP.db.gps
     local mapID, x, y = t.mapID, t.x, t.y
-    if Gps.leg then mapID, x, y = Gps.leg.from.mapID, Gps.leg.from.mx, Gps.leg.from.my end
+    if Gps.leg then mapID, x, y = Gps.leg.from.mapID, Gps.leg.from.mx, Gps.leg.from.my
+    elseif Gps.door and Gps.door.m and Gps.door.mx then -- spec 038, R5: pino na entrada
+        mapID, x, y = Gps.door.m, Gps.door.mx, Gps.door.my
+    end
     if Gps.leg and C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(mapID) then
         mapID, x, y = zonePoint(mapID, x, y) -- pino no mapa da zona do ponto de voo
     end
@@ -326,6 +424,7 @@ showWaypoint = function()
     end
     if arrow then arrow.title:SetText(title) end
 end
+function Gps.RefreshWaypoint() showWaypoint() end
 function Gps.SetTarget(mapID, x, y, title)
     local t = Gps.target
     if t and t.mapID == mapID and math.abs(t.x - x) < 0.01 and math.abs(t.y - y) < 0.01 and t.title == title then
@@ -342,6 +441,7 @@ function Gps.SetTarget(mapID, x, y, title)
     ns.FP.Debug(string.format("gps: alvo %s @%s %.1f,%.1f mundo=%s", tostring(title), tostring(mapID), x, y, tostring(world ~= nil)))
     local ok, leg = pcall(reroute)
     Gps.leg = ok and leg or nil
+    Gps.UpdateDoor() -- spec 038
     updateRoad()
     if not ticker and C_Timer and C_Timer.NewTicker then ticker = C_Timer.NewTicker(REROUTE_EVERY, Gps.Reroute) end
     if db.arrow then arrow = arrow or buildArrow() end
@@ -359,11 +459,12 @@ function Gps.Reroute()
     if not Gps.target then return end
     local ok, leg = pcall(reroute)
     if not ok then leg = nil end
-    if legKey(leg) ~= legKey(Gps.leg) then
+    local legChanged = legKey(leg) ~= legKey(Gps.leg)
+    if legChanged then
         Gps.leg = leg
         ns.FP.Debug("gps: rota " .. (leg and legKey(leg) or "a pé"))
-        showWaypoint()
     end
+    if Gps.UpdateDoor() or legChanged then showWaypoint() end -- spec 038
     updateRoad()
 end
 
@@ -378,6 +479,7 @@ function Gps.Clear(silent)
     Gps.target = nil
     Gps.leg = nil
     Gps.road = nil
+    Gps.door = nil
     if ticker then ticker:Cancel(); ticker = nil end
     Gps.SetInfo(nil)
     clearWaypoints()
