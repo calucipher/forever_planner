@@ -12,6 +12,7 @@ Pensado para Warlock Undead, mas funciona pra qualquer classe e raça.
 - **Macros**: leveling e avançadas para Warlock, Warrior, Mage e Druid, feitas para repeat (ex.: Razer Naga): alvo automático só em combate, listas de prioridade e `/castsequence`, criadas com 1 clique. Canalizados e controle vêm marcados "sem repeat". Dica para o spam: `/console Sound_EnableErrorSpeech 0` corta a voz de "não está pronto". O texto usa os nomes do seu client e só os feitiços que você conhece; quando você aprende um feitiço, as macros já criadas se atualizam sozinhas.
 - **Procurar grupo**: na aba Buscar do LFG, um painel ao lado lista os grupos do seu nível primeiro. "Chamar" abre o whisper do líder com o texto pronto (classe, nível, papel e atividade): é só apertar Enter. O painel marca quem você já chamou.
 - **Builds**: talentos por faixa de nível, pesos de atributo editáveis, Legacy e dicas de rota.
+- **Ferramentas**: todo comando `/fp` tem um botão aqui, agrupado por assunto, com o resultado na própria aba em vez do chat. Quem não decorou o comando acha a função por ela.
 
 ## Instalação
 
@@ -49,7 +50,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 
 | Comando | O que faz |
 |---|---|
-| `/fp` | Abre ou fecha o painel (ou clique no botão do minimapa) |
+| `/fp` | Abre ou fecha o painel (ou clique no botão do minimapa). Os comandos abaixo também têm botão na aba Ferramentas |
 | `/fp minimapa` | Esconde ou mostra o botão do minimapa |
 | `/fp entregar` | GPS segue o hub mais perto com quests prontas para entregar; sem nenhuma na zona, segue a entrega pronta mais perto de qualquer zona |
 | `/fp limpar` | Lista as quests do log que não valem a pena e abandona só se você confirmar |

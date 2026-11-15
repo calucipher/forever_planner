@@ -408,6 +408,12 @@ end
 ------------------------------------------------------------------------------------------
 -- Comando (R11)
 ------------------------------------------------------------------------------------------
+-- Spec 040: estado para o botão da aba Ferramentas.
+function Journal.IsOn()
+    if not J then init() end
+    return J.on == true
+end
+
 function Journal.Command(arg)
     if not J then init() end
     arg = (arg or ""):lower()

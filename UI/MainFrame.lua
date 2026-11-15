@@ -52,10 +52,11 @@ local function build()
     -- Barra de abas
     f.tabButtons = {}
     local x = 10
+    local step = math.min(114, math.floor((W - 20) / math.max(#UI.order, 1))) -- spec 040: 6 abas cabem
     for _, id in ipairs(UI.order) do
         local tab = UI.tabs[id]
         local b = CreateFrame("Button", nil, f)
-        b:SetSize(110, 26); b:SetPoint("TOPLEFT", x, -52)
+        b:SetSize(step - 4, 26); b:SetPoint("TOPLEFT", x, -52)
         b.label = Theme.Text(b, 12, Theme.c.muted)
         b.label:SetPoint("CENTER"); b.label:SetText(tab.label)
         b.line = b:CreateTexture(nil, "ARTWORK")
@@ -65,7 +66,7 @@ local function build()
         b:SetScript("OnEnter", function(self) if UI.current ~= id then self.label:SetTextColor(unpack(Theme.c.text)) end end)
         b:SetScript("OnLeave", function(self) if UI.current ~= id then self.label:SetTextColor(unpack(Theme.c.muted)) end end)
         f.tabButtons[id] = b
-        x = x + 114
+        x = x + step
     end
     local div = Theme.Divider(f)
     div:SetPoint("TOPLEFT", 10, -78); div:SetPoint("TOPRIGHT", -10, -78)

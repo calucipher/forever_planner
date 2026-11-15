@@ -4,23 +4,21 @@ local Theme = ns.Theme
 local Menu = {}
 ns.QuickMenu = Menu
 
-local ITEMS = {
-    { "Recalcular rota", function() ns.Guide.FollowBest("best") end,
-        "Escolhe o hub de maior XP/h desta zona (2+ quests) e refaz a rota a partir de onde você está" },
-    { "Ir entregar", function() ns.Guide.FollowBest("turnin") end, "Hub mais perto com quests prontas para entregar" },
-    { "Bolsa", function() ns.Guide.FollowBag() end, "Segue a melhor quest que dá bolsa (zona atual primeiro)" },
-    { "Classe", function() ns.ClassGuide.Follow() end, "Segue a melhor quest de classe (pets, bolsa de alma, montaria)" },
-    { "Ponto de voo", function() ns.Planner.FollowFlightPoint() end, "Aponta a seta para o ponto de voo descoberto mais perto" },
-    { "Armas", function() Menu.ShowWeapons() end, "Escolhe as armas que você usa e aponta a seta para o treinador" },
-    { "Grupo", function() ns.Group.ShareAll() end, "Compartilha as quests do log com o grupo e manda um resumo do que falta" },
-    { "Calibração", function() ns.FP.PrintCalib() end,
-        "Mostra no chat o tempo por morte, o fator de XP e a tolerância de mobs altos, com a fonte (o mesmo que /fp calib)" },
-    { "Limpar o log", function() Menu.ShowCleanup() end, "Mostra quests que não valem a pena; abandona só se você confirmar" },
-    { "Reativar quests", function() ns.Planner.ConfirmClearUnavailable("menu +") end,
-        "Desfaz as marcas de quest indisponível (pede confirmação). Não serve para atualizar: para isso, 'Recalcular rota'." },
-}
+-- Spec 040: cada item é um id do registro (Commands.lua); rótulo, dica e ação vêm de lá.
+Menu.items = { "guia", "entregar", "bolsa", "classe", "voo", "armas", "grupo", "calib", "limpar", "indisponiveis limpar" }
+
+local function itemsFromRegistry()
+    local byId, out = {}, {}
+    for _, c in ipairs(ns.Commands.list) do byId[c.id] = c end
+    for _, id in ipairs(Menu.items) do
+        local c = byId[id]
+        if c then out[#out + 1] = { c.label, function() c.run(nil) end, c.tip } end
+    end
+    return out
+end
 
 local function buildMenu()
+    local ITEMS = itemsFromRegistry()
     local f = Theme.Panel(UIParent, Theme.c.bg, Theme.c.border)
     f:SetSize(170, 16 + #ITEMS * 30)
     f:SetFrameStrata("DIALOG"); f:SetClampedToScreen(true); f:Hide()
