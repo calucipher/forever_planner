@@ -58,6 +58,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 | `/fp bolsas` | Lista as quests de bolsa do personagem: zona, nível e situação |
 | `/fp classe` | Lista as quests de classe (pets, bolsa de alma, Soran'ruk, Felsteed) e segue a melhor |
 | `/fp marcos` | Próximos marcos da classe e perícias de arma que faltam treinar, com o Weapon Master |
+| `/fp voos` | Mostra ou esconde os pontos de voo no mapa-múndi |
 | `/fp lfg` | Abre o painel de procurar grupo. `/fp lfg texto <t>` e `/fp lfg solo <t>` trocam o texto do whisper; `/fp lfg padrao` volta ao original; `/fp lfg copiar` faz o Chamar só copiar o texto |
 | `/fp diario on\|off\|limpar` | Liga, desliga ou apaga o diário (veja Limitações) |
 | `/fp debug` | Liga/desliga o modo debug: registra as decisões do guia (gravado no disco no `/reload` ou logout). `/fp debug chat` mostra no chat também |
@@ -80,6 +81,9 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 - **Botão do minimapa**: clique abre/fecha o painel, clique direito segue o melhor hub, arraste para mover. O addon também aparece no menu de addons do minimapa.
 - Na aba **Guia**, clique num hub para ver o circuito e em *Seguir este hub*. O GPS aponta a próxima parada e avança sozinho quando você pega, cumpre ou entrega.
 - **Sugestão de zona**: no topo da aba Guia, quanto a zona atual rende e se vale ficar, ir para outra zona ou fazer grind (e onde). O chat avisa uma vez quando a zona acabou. É estimativa: conta a viagem e as cadeias, e fica melhor depois da calibração.
+- **Pontos de voo no mapa**: verde é ponto descoberto, vermelho é ponto que falta abrir, amarelo é a conferir. O jogo não diz fora do mestre de voo quais você conhece: abra a janela de um mestre de voo uma vez em cada continente para o addon aprender. Clique no pino para a seta ir até ele.
+- Quando o circuito passa perto de um ponto de voo vermelho (até 400 jardas de desvio), entra a parada **Abrir ponto de voo**. A seta também usa os pontos que você conhece para voar quando compensa.
+- **Quest cinza** (6 níveis ou mais abaixo de você) sai da rota, a não ser que seja de classe, de bolsa, entrega pronta ou leve a um item bom (upgrade significativo ou item azul que você usa, na própria quest ou mais adiante na cadeia). Nesse caso o nome mostra "(leva a: item)". Quest do log que rende pouco também sai da rota, mas fica no log: abandone pelo `/fp limpar` se quiser.
 - Quest cujos mobs do objetivo estão, em média, mais de 1,5 nível acima de você fica fora do circuito como **mobs altos, volta no N**. Ela entra sozinha quando você chega no nível N.
 - Depois de 5 mortes, o tempo por morte e o fator de XP passam a ser os medidos no jogo (`/fp calib`).
 - Clique numa quest para o GPS segui-la.

@@ -83,16 +83,11 @@ end
 
 -- Pontos de voo descobertos do continente do jogador, com posição no mundo (R5).
 local function taxiNodes(cont)
-    local T = _G.C_TaxiMap
-    if not (T and T.GetAllTaxiNodes and ns.Planner and ns.Planner.ContinentMap) then return {} end
+    if not (ns.Planner and ns.Planner.ContinentMap) then return {} end
     local cmap = ns.Planner.ContinentMap(C_Map.GetBestMapForUnit("player"))
     if not cmap then return {} end
-    local E = _G.Enum
-    local states = E and E.FlightPathState or { Reachable = 0, Current = 1 }
-    local ok, raw = pcall(T.GetAllTaxiNodes, cmap)
-    if not ok then return {} end
     local out = {}
-    for _, p in ipairs(Util.TaxiPoints(raw, cmap, function(st) return st == states.Reachable or st == states.Current end)) do
+    for _, p in ipairs(ns.Planner.KnownTaxiPoints(cmap)) do -- spec 044, R8
         local c, w = C_Map.GetWorldPosFromMapPos(cmap, CreateVector2D(p.x / 100, p.y / 100))
         if w and c == cont then
             local wx, wy = w:GetXY()
@@ -117,6 +112,10 @@ end
 ------------------------------------------------------------------------------------------
 -- Pela estrada (spec 034): constantes são estimativa, a calibrar no jogo
 ------------------------------------------------------------------------------------------
+-- Spec 038, R3a (emenda de 21/11/2026): pegada aprendida com alcance menor é prédio, não caverna.
+-- Medido em 21/11/2026: prédios de cidade 3–40 jd (Ratchet, Valley of Strength, Fenris Keep);
+-- cavernas 151–392 jd (Beren's Peril, Wailing Caverns). Estimativa.
+local CAVE_MIN_REACH = 60
 local ROAD = { minDist = 400, maxAccess = 150, factor = 1.6, ahead = 30, offRoute = 60 }
 Gps.road = nil -- caminho de Roads.Path + dest, para o trecho a pé (até o alvo ou o ponto de voo)
 
@@ -164,7 +163,7 @@ function Gps.UpdateDoor()
         local cont, px, py = playerWorld()
         if cont then
             local ok, d = pcall(ns.Caves.Door, caveList(), { c = cont, x = px, y = py, indoors = indoors() },
-                { c = t.world[1], x = t.world[2], y = t.world[3] }, { arrive = ns.FP.db.gps.arriveYards })
+                { c = t.world[1], x = t.world[2], y = t.world[3] }, { arrive = ns.FP.db.gps.arriveYards, minReach = CAVE_MIN_REACH })
             if not ok then ns.FP.Debug("gps: entrada descartada: " .. tostring(d)) end
             door = ok and d or nil
         end

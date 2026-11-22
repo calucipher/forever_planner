@@ -397,6 +397,42 @@ function Planner.ContinentMap(map)
     return map
 end
 
+-- Spec 044 (R1, R7) e 045: pontos de voo do mapa que a facção usa, com known do mestre de voo.
+-- Pontos { id, name, x, y (0–100), known, atlas, mapID }. Sem a API: lista vazia.
+function Planner.FlightNodes(mapID)
+    local T, E = _G.C_TaxiMap, _G.Enum
+    if not (mapID and T and T.GetTaxiNodesForMap and E and E.FlightPathFaction) then return {} end
+    local ok, raw = pcall(T.GetTaxiNodesForMap, mapID)
+    if not ok or type(raw) ~= "table" then
+        if not ok then ns.FP.Debug("voos: GetTaxiNodesForMap falhou: " .. tostring(raw)) end
+        return {}
+    end
+    local known = (ns.FP.db.taxiKnown or {})[Planner.ContinentMap(mapID)]
+    local list = ns.Util.FlightNodes(raw, (_G.UnitFactionGroup("player")), E.FlightPathFaction, known)
+    for _, p in ipairs(list) do p.mapID = mapID end
+    return list
+end
+
+-- Spec 044, R8 (emenda de 21/11/2026): pontos de voo conhecidos do mapa do continente, para a seta,
+-- a viagem real e o "seguir ponto de voo". Vem do que o mestre de voo mostrou (db.taxiKnown); sem
+-- isso, a lista do jogo, que no Forever não é confiável fora do mestre. Pontos 0–100 em cmap.
+function Planner.KnownTaxiPoints(cmap)
+    if not cmap then return {} end
+    if (ns.FP.db.taxiKnown or {})[cmap] then
+        local out = {}
+        for _, p in ipairs(Planner.FlightNodes(cmap)) do
+            if p.known then out[#out + 1] = { mapID = cmap, x = p.x, y = p.y, name = p.name, source = "taxi" .. tostring(p.id) } end
+        end
+        if #out > 0 then return out end
+    end
+    local T = _G.C_TaxiMap
+    if not (T and T.GetAllTaxiNodes) then return {} end
+    local states = (_G.Enum and _G.Enum.FlightPathState) or { Reachable = 0, Current = 1 }
+    local ok, raw = pcall(T.GetAllTaxiNodes, cmap)
+    if not ok or type(raw) ~= "table" then return {} end
+    return ns.Util.TaxiPoints(raw, cmap, function(s) return s == states.Reachable or s == states.Current end)
+end
+
 -- Spec 018, R1/R3: seta no ponto de voo descoberto mais perto (API do jogo, continente do jogador).
 function Planner.FollowFlightPoint()
     local T = _G.C_TaxiMap
@@ -404,9 +440,7 @@ function Planner.FollowFlightPoint()
         ns.FP.Print("este client não informa os pontos de voo."); return
     end
     local map = Planner.ContinentMap(C_Map.GetBestMapForUnit("player"))
-    local E = _G.Enum
-    local states = E and E.FlightPathState or { Reachable = 0, Current = 1 }
-    local pts = ns.Util.TaxiPoints(T.GetAllTaxiNodes(map), map, function(s) return s == states.Reachable or s == states.Current end)
+    local pts = Planner.KnownTaxiPoints(map) -- spec 044, R8
     local from = Planner.PlayerPoint()
     if not from then ns.FP.Print("não consegui ler a sua posição agora."); return end
     local best = Planner.Nearest(from, pts)

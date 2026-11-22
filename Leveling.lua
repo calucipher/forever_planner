@@ -153,6 +153,29 @@ function Leveling.NearestOrder(start, stops, dist)
     return ordered, legs, cursor
 end
 
+-- Spec 045, R1: põe `extra` onde soma menos caminho entre as paradas (não a partir do jogador, para
+-- não entrar e sair andando). Devolve lista nova e o custo, ou nil acima de maxDetour.
+function Leveling.InsertDetour(stops, extra, dist, maxDetour)
+    if #stops == 0 then return nil end
+    local x = extra.point
+    local bestI, bestCost
+    for i = 1, #stops do
+        local a, b = stops[i].point, stops[i + 1] and stops[i + 1].point
+        local cost = legOf(dist, a, x) + (b and (legOf(dist, x, b) - legOf(dist, a, b)) or 0)
+        if not bestCost or cost < bestCost then bestI, bestCost = i, cost end
+    end
+    if bestCost > maxDetour then return nil end
+    local out = {}
+    for i, s in ipairs(stops) do
+        out[#out + 1] = s
+        if i == bestI then
+            extra.round = s.round
+            out[#out + 1] = extra
+        end
+    end
+    return out, bestCost
+end
+
 -- Spec 006, R13: objetivo espalhado. Ponto não visitado mais perto de `from`; com todos
 -- visitados, limpa `visited` (o objeto renasce) e volta a valer o mais perto.
 function Leveling.NextPoint(points, from, visited, dist)
@@ -347,8 +370,26 @@ function Leveling.TooHigh(qLevel, playerLevel, state)
         and qLevel > playerLevel + Leveling.MAX_LEVELS_ABOVE
 end
 
+-- Spec 046, R7: quest cinza = 6 níveis ou mais abaixo (o corte da limpeza do log, spec 006 R10).
+Leveling.GRAY_QUEST_LEVELS = 6
+function Leveling.IsGrayQuest(qLevel, playerLevel)
+    return qLevel ~= nil and playerLevel ~= nil and playerLevel ~= false
+        and playerLevel - qLevel >= Leveling.GRAY_QUEST_LEVELS
+end
+
+-- Spec 046, R9: item que segura a quest cinza: upgrade significativo ou raro (ou melhor) usável.
+function Leveling.ItemWorth(delta, quality, minDelta)
+    if delta == nil then return false end
+    return delta >= (minDelta or 10) or (quality or 0) >= 3
+end
+
 local function asideReason(q, p)
     if q.forceAside then return q.forceAside end -- ex.: satélite com desvio grande (spec 008)
+    -- Spec 046, R8: cinza sai, salvo classe, bolsa, item que vale (goal) ou entrega pronta.
+    if q.state ~= "entregar" and Leveling.IsGrayQuest(q.qLevel, p.playerLevel)
+        and not (q.classQuest or q.bag or q.goal) then
+        return "cinza"
+    end
     -- Spec 025, R1: quest do log alta demais sai do circuito; a entrega pronta fica.
     if Leveling.TooHigh(q.qLevel, p.playerLevel, q.state) then return "nível alto" end
     local high -- spec 030, R3: o objetivo mais alto decide; backAt = nível em que volta
@@ -511,11 +552,15 @@ function Leveling.BuildCircuit(quests, start, p, dist)
     for _, q in ipairs(candidates) do
         local value, seconds = ownEstimate(q, p)
         entries[#entries + 1] = { id = q.id, value = value, seconds = seconds, requires = q.requires, quest = q,
-            locked = q.state ~= "pegar" or q.bag, -- R34: o que já está no log não sai; spec 010: bolsa
+            -- R34 com a emenda da spec 046 (R1, R2): do log, só a entrega pronta e a protegida (keep) ficam
+            -- travadas; a em andamento entra no corte. Spec 010: bolsa.
+            locked = q.state == "entregar" or q.bag or (q.state == "fazer" and q.keep),
             ahead = q.state == "pegar" and q.ahead or nil } -- spec 039, R4: passos adiante da cadeia
     end
     local kept, dropped = Leveling.SelectQuests(entries, p.threshold or 0)
-    for _, e in ipairs(dropped) do aside[#aside + 1] = { id = e.id, reason = "abaixo do limiar" } end
+    for _, e in ipairs(dropped) do -- spec 046, R3: a do log sai com "rende pouco" (e não é abandonada)
+        aside[#aside + 1] = { id = e.id, reason = e.quest.state == "fazer" and "rende pouco" or "abaixo do limiar" }
+    end
     for _, e in ipairs(dropped) do out[e.id] = true end
     -- R13a + R15: refaz o corte do log sem quem saiu por depender, até não mudar.
     local pool = kept
@@ -547,7 +592,8 @@ function Leveling.BuildCircuit(quests, start, p, dist)
         for _, e in ipairs(kept) do for _, r in ipairs(e.quest.requires or {}) do needed[r] = true end end
         local final = {}
         for _, e in ipairs(kept) do
-            if e.chain and not needed[e.id] then aside[#aside + 1] = { id = e.id, reason = "abaixo do limiar" }
+            if e.chain and not needed[e.id] then
+                aside[#aside + 1] = { id = e.id, reason = e.quest.state == "fazer" and "rende pouco" or "abaixo do limiar" }
             else final[#final + 1] = e end
         end
         local changed = #final < #kept

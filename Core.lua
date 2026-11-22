@@ -35,6 +35,9 @@ FP.defaults = {
     threshold = 0.5,            -- agressividade: tira quest com taxa < 50% da média do circuito (R27)
     hubRadius = 80,             -- jardas entre quest givers do mesmo hub (R8)
     satelliteMaxDetour = 400,   -- desvio máximo para pegar satélite no caminho (spec 008)
+    flightMaxDetour = 400,      -- desvio máximo para abrir ponto de voo no circuito (spec 045, estimativa)
+    flightOverhead = 10,        -- segundos para falar com o mestre de voo (spec 045, estimativa)
+    grayKeepDelta = 10,         -- upgrade (pontos de score) que segura quest cinza no circuito (spec 046, estimativa)
     calib = { xp = {}, kill = {}, danger = {} }, -- amostras reais das últimas mortes (R7) e lutas (spec 031)
     guide = nil,                -- hub seguido pelo GPS { map =, hub = }
     minimap = { angle = 225, hide = false }, -- botão do minimapa (spec 004)

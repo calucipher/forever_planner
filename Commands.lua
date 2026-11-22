@@ -195,6 +195,14 @@ Commands.list = {
             ns.FP.Fire("DUNGEONS")
         end,
         state = function() return ns.DungeonGuide.db().pins ~= false end },
+    { id = "voos", label = "Pontos de voo no mapa", section = "Interface", kind = "liga",
+        tip = "Pontos de voo no mapa-múndi: verde descoberto, vermelho a descobrir (spec 044)",
+        run = function()
+            db().flightPins = db().flightPins == false
+            FP().Print("pontos de voo no mapa:", onOff(db().flightPins ~= false))
+            if ns.FlightPins then ns.FlightPins.Refresh(true) end
+        end,
+        state = function() return db().flightPins ~= false end },
     -- Registro
     { id = "diario", label = "Diário", section = "Registro", kind = "liga", arg = "[on|off]",
         tip = "Diário do que você faz no jogo (spec 036). Sem argumento no comando: o resumo",

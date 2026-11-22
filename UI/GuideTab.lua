@@ -157,7 +157,7 @@ local function build(panel)
             local qs = {}
             for _, q in ipairs(s.quests) do qs[#qs + 1] = names[q] or tostring(q) end
             local color = s.kind == "pegar" and "FFFFD14D" or (s.kind == "entregar" and "FF73E65A" or "FFB38CFF")
-            local what = s.kind == "objetivo"
+            local what = s.kind == "voo" and ("abrir " .. (s.label or "?")) or s.kind == "objetivo"
                 and string.format("%s%s", s.label or "?", s.kills > 0 and string.format(" (~%d mortes%s)", s.kills, s.estimated and ", nível do mob estimado" or "")
                     or (s.objects > 0 and string.format(" (%d coletas)", s.objects) or ""))
                 or table.concat(qs, ", ")

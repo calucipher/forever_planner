@@ -80,6 +80,13 @@ ZoneContent.professionAreas = { [16941] = true }
 ZoneContent.helperNames = { "Invasion", "Necropolis", "[Ff]inder", "Proxy", "Relay", " health", "Trigger",
     "Bunny", "DND", "Dummy", "Resonating Crystal", "Shadow of Doom", "Flameshocker" }
 
+-- Spec 029 (emenda da R7, 21/11/2026): mobs que a base traz como normais mas não são de leveling
+-- da zona. Ficam fora do histograma (faixa, grind). Estimativa, não confirmada no jogo.
+-- 272401 Vale Screamer: novo na QuestieDB 1.1.4, nível 60, 163 spawns espalhados por Feralas
+-- (faixa 40–53), junto com Furious Brave e Furious Feathermoon Sentinel (55); parece evento do
+-- Forever. Sem ele, a faixa de Feralas volta a 41–53 (Wowhead npc=272401 só diz "Feralas").
+ZoneContent.notLevelingNpcs = { [272401] = true }
+
 -- Facções de bicho (Prey e Ambient): não contam como mob.
 ZoneContent.critterFactions = { [31] = true, [188] = true }
 

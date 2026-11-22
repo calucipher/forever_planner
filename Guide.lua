@@ -117,6 +117,35 @@ local function chainAheadOf(q, level)
     return a.n > 0 and a or nil
 end
 
+local function itemQuality(id)
+    local byID = C_Item.GetItemQualityByID
+    local quality = byID and byID(id)
+    if quality == nil then quality = select(3, C_Item.GetItemInfo(id)) end
+    return quality
+end
+
+-- Spec 046, R9: melhor item que vale a pena na quest ou num passo adiante da cadeia (spec 039).
+local function questGoal(q, level, bestItem, delta)
+    local D, minDelta, best = ns.Data, ns.FP.db.grayKeepDelta or 10, nil
+    local function try(item, d, step)
+        if item and ns.Leveling.ItemWorth(d, itemQuality(item), minDelta) and (not best or (d or 0) > (best.delta or 0)) then
+            best = { item = item, delta = d, step = step }
+        end
+    end
+    try(bestItem, delta, nil)
+    for _, n in ipairs(D.ChainAhead(q, level).ids) do
+        local item, d = ns.Scoring.BestReward(D.Rewards(n))
+        try(item, d, n)
+    end
+    return best
+end
+
+local function goalText(goal)
+    if not goal then return "" end
+    local name = C_Item.GetItemInfo(goal.item) or ("item " .. goal.item)
+    return (goal.step and " (cadeia leva a: " or " (leva a: ") .. name .. ")"
+end
+
 local function questInfo(q, level, requires)
     local D = ns.Data
     local objectives, elite, dungeon = D.Objectives(q, level, ns.FP.MobXPFactor())
@@ -124,15 +153,21 @@ local function questInfo(q, level, requires)
     local trainSkill, trainOn = ns.ClassGuide.MissingSkillFor(bestItem) -- spec 011, R6
     delta = ns.Milestones.EffectiveDelta(delta, trainSkill)
     local bag, bonusXP = D.WantsBag(q) -- spec 010 (R8: dispensada não conta; R9: bônus de XP)
+    local weapon = ns.Milestones.IsWeaponUpgrade(ns.ClassGuide.ItemClass(bestItem), delta, trainSkill) -- spec 012
+    local classQuest = (D.Q.requiredClasses(q) or 0) ~= 0
+    local qLevel = D.Q.questLevel(q)
+    -- Spec 046, R9: o item só importa para segurar a cinza (R8); fora dela não se calcula.
+    local goal = ns.Leveling.IsGrayQuest(qLevel, level) and questGoal(q, level, bestItem, delta) or nil
     return {
-        bag = bag, bonusXP = bonusXP or nil,
-        weapon = ns.Milestones.IsWeaponUpgrade(ns.ClassGuide.ItemClass(bestItem), delta, trainSkill), -- spec 012
+        bag = bag, bonusXP = bonusXP or nil, weapon = weapon,
+        classQuest = classQuest, goal = goal,
+        keep = classQuest or weapon or (delta or 0) > 0, -- spec 046, R2
         trainSkill = trainSkill, trainOn = trainOn, -- trainOn: arma habilitada na janela Armas (spec 016)
         id = q, name = D.Q.name(q) or ("Quest " .. q), state = ns.Planner.State(q),
         xp = (D.QuestXP(q, level)), money = D.QuestMoney(q), delta = delta,
         starters = D.StarterPoints(q), finishers = D.FinisherPoints(q),
         objectives = objectives, elite = elite, dungeon = dungeon, requires = requires,
-        qLevel = D.Q.questLevel(q), -- spec 025
+        qLevel = qLevel, -- spec 025
         ahead = chainAheadOf(q, level), -- spec 039, R3
     }
 end
@@ -265,6 +300,7 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
     for _, info in ipairs(list) do byID[info.id] = info end
     for _, info in ipairs(list) do
         names[info.id] = info.name .. (info.requires and " (cont.)" or "") .. (info.satellite and " (no caminho)" or "")
+            .. goalText(info.goal) -- spec 046, R10
             .. (info.bag and (info.bonusXP and " (bônus de XP)" or " (bolsa)") or "") .. (info.weapon and " (arma)" or "") .. (info.trainSkill and info.trainOn and (" (treine " .. info.trainSkill .. ")") or "")
     end
     for _, k in ipairs(c.kept) do
@@ -286,6 +322,35 @@ local cache = { key = nil, at = 0, rows = nil }
 
 function Guide.Invalidate() cache.key, cache.rows = nil, nil end
 
+-- Spec 045, R1–R4: parada "abrir ponto de voo" onde o desvio entre as paradas for curto.
+-- Um ponto por vez, o de menor custo primeiro; cada um soma desvio / velocidade + conversa.
+local flightSkip = {} -- R6a: parada de voo dispensada nesta sessão ("voo:taxi<id>" = true)
+local function addFlightStops(c, red)
+    local db = ns.FP.db
+    local maxDetour, speed = db.flightMaxDetour or 400, db.runSpeed or 7
+    local overhead = db.flightOverhead or 10
+    local left = {}
+    for _, p in ipairs(red) do
+        if not flightSkip["voo:taxi" .. tostring(p.id)] then left[#left + 1] = p end
+    end
+    while #left > 0 do
+        local bestI, bestOut, bestCost
+        for i, p in ipairs(left) do
+            local pt = { mapID = p.mapID, x = p.x, y = p.y, source = "taxi" .. tostring(p.id) }
+            local extra = { kind = "voo", key = "voo:" .. tostring(p.id), point = pt, points = { pt }, quests = {},
+                label = p.name }
+            local out, cost = ns.Leveling.InsertDetour(c.stops, extra, ns.Planner.Distance, maxDetour)
+            if out and (not bestCost or cost < bestCost) then bestI, bestOut, bestCost = i, out, cost end
+        end
+        if not bestI then break end
+        table.remove(left, bestI)
+        c.stops = bestOut
+        c.legs = (c.legs or 0) + bestCost
+        c.seconds = c.seconds + bestCost / speed + overhead
+        c.rate = c.seconds > 0 and c.value / c.seconds * 3600 or 0
+    end
+end
+
 -- Ranking de um mapa, sem cache (a aba Level, spec 035, pede vários mapas de uma vez).
 -- yield, opcional, é chamado a cada hub.
 function Guide.RankMap(mapID, player, level, yield)
@@ -301,9 +366,12 @@ function Guide.RankMap(mapID, player, level, yield)
         local h = anchor and Guide.NearestHub(hubs, anchor)
         if h then logByHub[h.key] = logByHub[h.key] or {}; table.insert(logByHub[h.key], q) end
     end
+    local red = {} -- spec 045, R2: pontos de voo a abrir do mapa
+    for _, p in ipairs(ns.Planner.FlightNodes(mapID)) do if p.known == false then red[#red + 1] = p end end
     local rows = {}
     for _, hub in ipairs(hubs) do
         local c = buildCircuit(hub, level, player, logByHub, hubs)
+        if #red > 0 and #c.kept > 0 then addFlightStops(c, red) end
         if #c.kept > 0 or #c.aside > 0 then
             local ready = 0
             for _, k in ipairs(c.kept) do if k.state == "entregar" then ready = ready + 1 end end
@@ -344,6 +412,7 @@ end
 ------------------------------------------------------------------------------------------
 local function stopLabel(stop, names)
     if stop.kind == "objetivo" then return "Objetivo: " .. (stop.label or "?") end
+    if stop.kind == "voo" then return "Abrir ponto de voo: " .. (stop.label or "?") end -- spec 045, R5
     local qs = {}
     for _, q in ipairs(stop.quests) do qs[#qs + 1] = names[q] or tostring(q) end
     local title = ns.Util.TargetTitle(stop.kind, ns.Data.PointName(stop.point), table.concat(qs, ", ")) -- spec 013
@@ -531,23 +600,28 @@ function Guide.CleanupList(mapID)
     for _, row in ipairs(Guide.Rank(mapID)) do
         local c = row.circuit
         local hubRate = c.seconds > 0 and c.value / c.seconds or 0
-        for _, k in ipairs(c.kept) do
-            if k.state == "fazer" then
-                local est = c.estimates[k.id] or { value = 0, seconds = 1 }
-                local qLevel = D.Q.questLevel(k.id) or level
-                local chainUpgrade, chainXP = false, 0
-                for _, n in ipairs(chainAhead(k.id, mapID)) do
-                    local _, delta = ns.Scoring.BestReward(D.Rewards(n))
-                    if delta and delta > 0 then chainUpgrade = true end
-                    chainXP = chainXP + (D.QuestXP(n, level) or 0)
-                end
-                items[#items + 1] = { id = k.id, name = c.names[k.id], incomplete = true,
-                    rate = est.value / math.max(est.seconds, 1), hubRate = hubRate,
-                    gray = level - qLevel >= GRAY_LEVELS,
-                    classQuest = (D.Q.requiredClasses(k.id) or 0) ~= 0, bagReward = D.WantsBag(k.id),
-                    chainUpgrade = chainUpgrade, chainXP = chainXP, medianXP = D.medianXPByLevel[qLevel],
-                    chainRate = chainRateOf(k.id, est, level) } -- spec 039, R7
+        local logQuests = {}
+        for _, k in ipairs(c.kept) do if k.state == "fazer" then logQuests[#logQuests + 1] = k end end
+        for _, a in ipairs(c.aside) do -- spec 046, R6: o que saiu da rota mas segue no log
+            if (a.reason == "rende pouco" or a.reason == "cinza") and D.IsOnQuest(a.id) then
+                logQuests[#logQuests + 1] = { id = a.id, state = "fazer" }
             end
+        end
+        for _, k in ipairs(logQuests) do
+            local est = c.estimates[k.id] or { value = 0, seconds = 1 }
+            local qLevel = D.Q.questLevel(k.id) or level
+            local chainUpgrade, chainXP = false, 0
+            for _, n in ipairs(chainAhead(k.id, mapID)) do
+                local _, delta = ns.Scoring.BestReward(D.Rewards(n))
+                if delta and delta > 0 then chainUpgrade = true end
+                chainXP = chainXP + (D.QuestXP(n, level) or 0)
+            end
+            items[#items + 1] = { id = k.id, name = c.names[k.id], incomplete = true,
+                rate = est.value / math.max(est.seconds, 1), hubRate = hubRate,
+                gray = level - qLevel >= GRAY_LEVELS,
+                classQuest = (D.Q.requiredClasses(k.id) or 0) ~= 0, bagReward = D.WantsBag(k.id),
+                chainUpgrade = chainUpgrade, chainXP = chainXP, medianXP = D.medianXPByLevel[qLevel],
+                chainRate = chainRateOf(k.id, est, level) } -- spec 039, R7
         end
     end
     local list = ns.Leveling.CleanupCandidates(items, ns.FP.db.threshold or 0.5)
@@ -694,10 +768,19 @@ ns.FP.On("READY", function() lastZone = lastZone or playerZone() end)
 ns.FP.On("GPS_ARRIVED", function()
     local cur = Guide.current
     if cur and cur.id:find("^objetivo:") then cur.visited[cur.point] = true end -- R13
+    -- Spec 045, R6a: chegou ao ponto de voo e não abriu o mestre em 20 s: a parada sai na sessão.
+    if cur and cur.id:find("^voo:") then
+        local id = cur.id
+        C_Timer.After(20, function()
+            local now = Guide.current
+            if now and now.id == id then flightSkip[id] = true; invalidateAndStep() end
+        end)
+    end
     C_Timer.After(1.5, step)
 end)
 ns.FP.On("READY", function() C_Timer.After(1, invalidateAndStep) end) -- R4: retoma depois do /reload
 ns.FP.On("DATA_READY", invalidateAndStep) -- R4: o índice termina segundos depois do READY
+ns.FP.On("TAXI_KNOWN", invalidateAndStep) -- spec 045, R6: ponto aberto sai do circuito
 
 ------------------------------------------------------------------------------------------
 -- Sugestão de zona (spec 029): ficar, ir para outra zona ou fazer grind

@@ -5,7 +5,7 @@ local _, ns = ...
 local Caves = {}
 ns.Caves = Caves
 
-local DEFAULTS = { jump = 30, merge = 15, step = 8, max = 300, near = 20, arrive = 10 }
+local DEFAULTS = { jump = 30, merge = 15, step = 8, max = 300, near = 20, arrive = 10, minReach = 0 }
 local function opt(opts, k) return (opts and opts[k]) or DEFAULTS[k] end
 
 local function dist(ax, ay, bx, by)
@@ -68,11 +68,19 @@ local function contains(e, x, y, near)
 end
 
 -- R3: entradas do continente c cuja área contém o ponto.
-function Caves.Find(caves, c, x, y, near)
+-- R3a (emenda de 21/11/2026): alcance da pegada aprendida, a maior distância da boca até um ponto.
+function Caves.Reach(e)
+    local pts, best = e.pts or {}, 0
+    for i = 1, #pts - 1, 2 do best = math.max(best, dist(e.x, e.y, pts[i], pts[i + 1])) end
+    return best
+end
+
+function Caves.Find(caves, c, x, y, near, minReach)
     local out = {}
-    near = near or DEFAULTS.near
+    near, minReach = near or DEFAULTS.near, minReach or DEFAULTS.minReach
     for _, e in ipairs(caves and caves[c] or {}) do
-        if contains(e, x, y, near) then out[#out + 1] = e end
+        -- R3a: prédio de cidade (pegada curta) não vale como caverna; a da lista sempre vale.
+        if (e.seed or Caves.Reach(e) >= minReach) and contains(e, x, y, near) then out[#out + 1] = e end
     end
     return out
 end
@@ -112,7 +120,7 @@ function Caves.Door(caves, player, target, opts)
     if not (caves and player and target) or player.c ~= target.c then return nil end
     local c, near, merge = player.c, opt(opts, "near"), opt(opts, "merge")
     if player.indoors then
-        local here = Caves.Find(caves, c, player.x, player.y, near)
+        local here = Caves.Find(caves, c, player.x, player.y, near, opt(opts, "minReach"))
         if not here[1] then return nil end
         for _, e in ipairs(here) do
             if contains(e, target.x, target.y, near) then return nil end
@@ -123,7 +131,7 @@ function Caves.Door(caves, player, target, opts)
         if dist(e.x, e.y, target.x, target.y) >= dist(player.x, player.y, target.x, target.y) then return nil end
         return door(confirmed(caves, c, e, merge), true)
     end
-    local there = Caves.Find(caves, c, target.x, target.y, near)
+    local there = Caves.Find(caves, c, target.x, target.y, near, opt(opts, "minReach"))
     if not there[1] then return nil end
     local e, d = nearestTo(there, player.x, player.y)
     if d <= opt(opts, "arrive") then return nil end

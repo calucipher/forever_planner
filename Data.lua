@@ -1007,6 +1007,7 @@ local function addMob(cat, n)
     local C, N = ns.ZoneContent or {}, Data.N
     local lo, hi = N.minLevel(n) or 0, N.maxLevel(n) or 0
     if lo <= 0 or hi > 63 or (N.npcFlags(n) or 0) ~= 0 then return end
+    if C.notLevelingNpcs and C.notLevelingNpcs[n] then return end
     local f = N.factionID(n) or 0
     if (C.critterFactions and C.critterFactions[f]) or ns.Zones.IsHelperName(N.name(n)) then return end
     if not ns.Zones.Hostile(Data.factionTemplate[f]) then return end

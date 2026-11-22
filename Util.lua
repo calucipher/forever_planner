@@ -122,6 +122,36 @@ function Util.TaxiPoints(nodes, mapID, isUsable)
     return out
 end
 
+-- Spec 044, R7: nodeID conhecidos na janela do mestre de voo (C_TaxiMap.GetAllTaxiNodes).
+function Util.TaxiKnown(nodes, states)
+    local set = {}
+    for _, n in ipairs(nodes or {}) do
+        if n.nodeID and (n.state == states.Current or n.state == states.Reachable) then set[n.nodeID] = true end
+    end
+    return set
+end
+
+-- Spec 044, R1: pontos de voo de C_TaxiMap.GetTaxiNodesForMap que a facção pode usar (a dela e os
+-- neutros, como o FlightPointDataProvider do jogo). F = Enum.FlightPathFaction. x, y de 0 a 100.
+-- known: conjunto do mestre de voo do continente (R7) ou nil; sem ele, o ponto fica a conferir (nil).
+-- No Forever, isUndiscovered vem sempre falso (emenda de 21/11/2026): só o verdadeiro vale.
+function Util.FlightNodes(nodes, faction, F, known)
+    local out = {}
+    for _, n in ipairs(nodes or {}) do
+        local p = n.position
+        local mine = n.faction == F.Neutral or (n.faction == F.Horde and faction == "Horde")
+            or (n.faction == F.Alliance and faction == "Alliance")
+        if mine and p and p.x and p.y then
+            local isKnown -- nil: a conferir
+            if n.isUndiscovered then isKnown = false
+            elseif known then isKnown = known[n.nodeID] == true end
+            out[#out + 1] = { id = n.nodeID, name = n.name, x = p.x * 100, y = p.y * 100,
+                known = isKnown, atlas = n.atlasName }
+        end
+    end
+    return out
+end
+
 -- Spec 019, R1: rota do transporte (kind "npc"|"object", id) só se ela mudar de continente; senão nil.
 function Util.CrossingRoute(routes, kind, id)
     local route = routes and routes[kind] and routes[kind][id]

@@ -2,7 +2,6 @@
 -- (Guide.RankMap), a oferta das outras zonas (Guide.ZoneOffer, spec 029) e a viagem real
 -- (Travel.Plan, com os pontos de voo, os transportes e a pedra de lar do jogo).
 local _, ns = ...
-local Util = ns.Util
 local LevelGuide = {}
 ns.LevelGuide = LevelGuide
 
@@ -22,12 +21,8 @@ LevelGuide.World = world
 
 -- Pontos de voo descobertos de um mapa de continente, com posição de mundo: { [cont] = { {x, y, name} } }.
 local function addNodes(nodes, cmap)
-    local T = _G.C_TaxiMap
-    if not (cmap and T and T.GetAllTaxiNodes and C_Map.GetWorldPosFromMapPos and CreateVector2D) then return end
-    local states = (_G.Enum and _G.Enum.FlightPathState) or { Reachable = 0, Current = 1 }
-    local ok, raw = pcall(T.GetAllTaxiNodes, cmap)
-    if not ok or type(raw) ~= "table" then return end
-    for _, p in ipairs(Util.TaxiPoints(raw, cmap, function(s) return s == states.Reachable or s == states.Current end)) do
+    if not (cmap and C_Map.GetWorldPosFromMapPos and CreateVector2D) then return end
+    for _, p in ipairs(ns.Planner.KnownTaxiPoints(cmap)) do -- spec 044, R8
         local c, w = C_Map.GetWorldPosFromMapPos(cmap, CreateVector2D(p.x / 100, p.y / 100))
         if c and w then
             local x, y = w:GetXY()
