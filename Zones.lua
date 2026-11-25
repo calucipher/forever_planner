@@ -240,4 +240,46 @@ function Zones.WorthTrip(cands, nearRate, p)
     return out
 end
 
+------------------------------------------------------------------------------------------
+-- Trilha por faixa de nível (spec 047)
+------------------------------------------------------------------------------------------
+-- R1: faixa de 10 em 10 (1–10, 11–20, ..., 51–60) que contém L.
+function Zones.Bracket(L)
+    local lo = math.floor((math.max(L or 1, 1) - 1) / 10) * 10 + 1
+    lo = math.min(lo, 51)
+    return lo, lo + 9
+end
+
+-- R2: etapas da faixa. zones = { { zone, lo, hi, quests, travel } }. Entra a zona que cruza a faixa
+-- com pelo menos opts.minQuests quests; etapa = zonas com mínimo a até opts.alt níveis do mínimo da
+-- primeira; dentro da etapa, a de menor viagem primeiro (sem viagem, no fim) e as outras são alternativas.
+function Zones.Trail(zones, lo, hi, opts)
+    local minQuests, alt = (opts and opts.minQuests) or 8, (opts and opts.alt) or 3
+    local inside = {}
+    for _, z in ipairs(zones or {}) do
+        if z.lo and z.hi and z.lo <= hi and z.hi >= lo and (z.quests or 0) >= minQuests then inside[#inside + 1] = z end
+    end
+    table.sort(inside, function(a, b)
+        if a.lo ~= b.lo then return a.lo < b.lo end
+        return tostring(a.zone) < tostring(b.zone)
+    end)
+    local steps, cur = {}, nil
+    for _, z in ipairs(inside) do
+        if not cur or z.lo - cur.lo > alt then
+            cur = { lo = z.lo, zones = {} }
+            steps[#steps + 1] = cur
+        end
+        cur.zones[#cur.zones + 1] = z
+    end
+    local huge = math.huge
+    for _, st in ipairs(steps) do
+        table.sort(st.zones, function(a, b)
+            local ta, tb = a.travel or huge, b.travel or huge
+            if ta ~= tb then return ta < tb end
+            return a.lo < b.lo
+        end)
+    end
+    return steps
+end
+
 return Zones

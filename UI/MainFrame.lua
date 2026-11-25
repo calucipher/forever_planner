@@ -135,7 +135,8 @@ function UI.Toggle()
     if not ns.FP.db then return end
     if not UI.frame then
         UI.frame = build()
-        UI.Select(ns.FP.db.ui.tab or "quests")
+        local saved = ns.FP.db.ui.tab
+        UI.Select(saved and UI.tabs[saved] and saved or "quests") -- a aba Level virou seção da Quests (spec 047)
         return
     end
     UI.frame:SetShown(not UI.frame:IsShown())

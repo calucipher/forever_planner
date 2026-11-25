@@ -153,6 +153,87 @@ function Leveling.NearestOrder(start, stops, dist)
     return ordered, legs, cursor
 end
 
+-- Spec 053, R2 (parecer 053-056): a inversão de i..j só muda a ordem dentro do trecho; confere só ele.
+local function segmentOk(list, i, j)
+    local pos
+    for k = i, j do
+        local s = list[k]
+        if s.after and s.after[1] then
+            if not pos then
+                pos = {}
+                for m = i, j do if list[m].key then pos[list[m].key] = m end end
+            end
+            for _, key in ipairs(s.after) do
+                if pos[key] and pos[key] > k then return false end
+            end
+        end
+    end
+    return true
+end
+
+local function reverse(list, i, j)
+    while i < j do list[i], list[j] = list[j], list[i]; i, j = i + 1, j - 1 end
+end
+
+-- Spec 053, R1: 2-opt na rota aberta que começa em start; cada parada já tem `point`.
+local UNTANGLE_PASSES = 20
+function Leveling.Untangle(start, stops, dist)
+    local route = {}
+    for i, s in ipairs(stops) do route[i] = s end
+    local n = #route
+    local function d(a, b) return (a and b) and legOf(dist, a, b) or 0 end
+    for _ = 1, (n >= 2) and UNTANGLE_PASSES or 0 do
+        local improved = false
+        for i = 1, n - 1 do
+            for j = i + 1, n do
+                local a = i == 1 and start or route[i - 1].point
+                local b, c = route[i].point, route[j].point
+                local e = route[j + 1] and route[j + 1].point
+                if d(a, c) + d(b, e) < d(a, b) + d(c, e) - 1e-6 then
+                    reverse(route, i, j)
+                    if segmentOk(route, i, j) then improved = true else reverse(route, i, j) end
+                end
+            end
+        end
+        if not improved then break end
+    end
+    local legs, cursor = 0, start
+    for _, s in ipairs(route) do
+        legs = legs + d(cursor, s.point)
+        cursor = s.point
+    end
+    return route, legs, cursor
+end
+
+-- Spec 053, R4: paradas de `extras` com desvio curto entre as paradas, a mais barata primeiro.
+function Leveling.OnTheWay(stops, extras, maxDetour, dist, anchor)
+    local out, left, added, total = stops, {}, {}, 0
+    for i, x in ipairs(extras or {}) do left[i] = x end
+    while #left > 0 do
+        local bestI, bestOut, bestCost
+        for i, x in ipairs(left) do
+            local o, cost = Leveling.InsertDetour(out, x, dist, maxDetour)
+            if anchor and out[1] then -- R4 (parecer): antes da primeira, medindo do ponto fixo
+                local c1 = legOf(dist, anchor, x.point) + legOf(dist, x.point, out[1].point) - legOf(dist, anchor, out[1].point)
+                if c1 <= maxDetour and (not cost or c1 < cost) then
+                    o, cost = { x }, c1
+                    for _, s in ipairs(out) do o[#o + 1] = s end
+                    x.round = out[1].round
+                end
+            end
+            if o and (not bestCost or cost < bestCost) then bestI, bestOut, bestCost = i, o, cost end
+        end
+        if not bestI then break end
+        added[#added + 1] = { stop = table.remove(left, bestI), cost = bestCost }
+        out, total = bestOut, total + bestCost
+    end
+    if out == stops then -- R4: a lista recebida não muda
+        out = {}
+        for i, s in ipairs(stops) do out[i] = s end
+    end
+    return out, added, total
+end
+
 -- Spec 045, R1: põe `extra` onde soma menos caminho entre as paradas (não a partir do jogador, para
 -- não entrar e sair andando). Devolve lista nova e o custo, ou nil acima de maxDetour.
 function Leveling.InsertDetour(stops, extra, dist, maxDetour)
@@ -174,6 +255,141 @@ function Leveling.InsertDetour(stops, extra, dist, maxDetour)
         end
     end
     return out, bestCost
+end
+
+-- Spec 045, R2c: põe `extra` na posição idx (antes da parada idx). Devolve lista nova e o custo do
+-- desvio: d(anterior, x) + d(x, seguinte) − d(anterior, seguinte); sem anterior, d(x, seguinte).
+function Leveling.InsertAt(stops, extra, idx, dist)
+    local prev, nxt = stops[idx - 1], stops[idx]
+    local x = extra.point
+    local cost
+    if prev and nxt then
+        cost = legOf(dist, prev.point, x) + legOf(dist, x, nxt.point) - legOf(dist, prev.point, nxt.point)
+    elseif nxt then cost = legOf(dist, x, nxt.point)
+    elseif prev then cost = legOf(dist, prev.point, x)
+    else cost = 0 end
+    extra.round = (prev or nxt or {}).round
+    local out = {}
+    for i, s in ipairs(stops) do
+        if i == idx then out[#out + 1] = extra end
+        out[#out + 1] = s
+    end
+    if idx > #stops then out[#out + 1] = extra end
+    return out, cost
+end
+
+-- Spec 045, R2b (revista): jardas a pé economizadas nas pernas { {a, b} } saindo voando de `node`
+-- até o conhecido mais perto de b, quando o voo passa pela regra da seta (spec 024, R1 com a emenda:
+-- trecho a pé até walkShare do caminho e tempo até o a pé + margin). opts = { run, fly, factor,
+-- overhead, margin, walkShare }.
+function Leveling.FlightSaving(legs, node, known, dist, opts)
+    local total, share = 0, opts.walkShare or 0.75
+    for _, leg in ipairs(legs or {}) do
+        local a, b = leg[1], leg[2]
+        local k, kd
+        for _, n in ipairs(known or {}) do
+            local d = legOf(dist, n, b)
+            if not kd or d < kd then k, kd = n, d end
+        end
+        if k then
+            local direct = legOf(dist, a, b)
+            local onFoot = legOf(dist, a, node) + kd
+            local flyTime = onFoot / opts.run + opts.overhead + legOf(dist, node, k) * opts.factor / opts.fly
+            if onFoot <= share * direct and flyTime <= direct / opts.run + (opts.margin or 0) then
+                total = total + (direct - onFoot)
+            end
+        end
+    end
+    return total
+end
+
+-- Spec 052: regra única das paradas "abrir ponto de voo", para a viagem toda a partir do jogador.
+-- Devolve a lista nova, as paradas que entraram ({ node, cost, why }) e o desvio total (jardas).
+-- Um ponto por nó durante a conta (o cache de posição do Planner usa a tabela como chave); a
+-- entrada não muda (parecer 050-052).
+local function flightPoint(p, cache)
+    cache[p] = cache[p] or { mapID = p.mapID, x = p.x, y = p.y, zone = p.zone, source = "taxi" .. tostring(p.id) }
+    return cache[p]
+end
+local function flightStop(p, cache)
+    local pt = flightPoint(p, cache)
+    return { kind = "voo", key = "voo:" .. tostring(p.id), point = pt, points = { pt }, quests = {}, label = p.name }
+end
+
+-- R3–R6: melhor posição de um ponto; nil se nenhuma vale.
+local function bestSpot(start, stops, p, ctx, exitIdx, cache)
+    local dist, x = ctx.dist, flightPoint(p, cache)
+    local mine = ctx.here ~= nil and p.zone == ctx.here
+    local last = #stops + 1
+    if mine and exitIdx then last = exitIdx end -- R5: abre antes de sair da zona
+    local best
+    for idx = 1, last do
+        local prev = idx == 1 and start or (stops[idx - 1] and stops[idx - 1].point)
+        local nxt = stops[idx] and stops[idx].point
+        local cost
+        if prev and nxt then cost = legOf(dist, prev, x) + legOf(dist, x, nxt) - legOf(dist, prev, nxt)
+        elseif nxt then cost = legOf(dist, x, nxt)
+        elseif prev then cost = legOf(dist, prev, x)
+        else cost = 0 end
+        if not best or cost < best.cost then
+            local why
+            if cost <= ctx.maxDetour then why = "caminho"
+            elseif mine and exitIdx and cost <= ctx.zoneMax then why = "zona"
+            else
+                local legs, from = {}, x
+                for k = idx, #stops do legs[#legs + 1] = { from, stops[k].point }; from = stops[k].point end
+                if cost < Leveling.FlightSaving(legs, x, ctx.known, dist, ctx.fopts) then why = "economiza" end
+            end
+            if why then best = { idx = idx, cost = cost, why = why } end
+        end
+    end
+    return best
+end
+
+function Leveling.FlightStops(start, stops, red, ctx)
+    local zones = {}
+    if ctx.here ~= nil then zones[ctx.here] = true end
+    for _, s in ipairs(stops) do
+        local z = s.point and ctx.zoneOf(s.point)
+        if z ~= nil then zones[z] = true end
+    end
+    local left = {}
+    for _, p in ipairs(red or {}) do -- R2
+        if p.zone ~= nil and zones[p.zone] then left[#left + 1] = p end
+    end
+    local out = {}
+    for i, s in ipairs(stops) do out[i] = s end
+    local added, total, cache = {}, 0, {}
+    while #left > 0 do
+        local exitIdx
+        if ctx.here ~= nil then
+            for i, s in ipairs(out) do
+                local z = s.point and (s.kind == "voo" and s.point.zone or ctx.zoneOf(s.point))
+                if z ~= nil and z ~= ctx.here then exitIdx = i; break end
+            end
+        end
+        local pick, pickI
+        for i, p in ipairs(left) do
+            local spot = bestSpot(start, out, p, ctx, exitIdx, cache)
+            if spot and (not pick or spot.cost < pick.cost) then pick, pickI = spot, i end
+        end
+        if not pick then break end
+        local p = table.remove(left, pickI)
+        local extra = flightStop(p, cache)
+        extra.round = (out[pick.idx - 1] or out[pick.idx] or {}).round -- R7
+        table.insert(out, pick.idx, extra)
+        added[#added + 1] = { node = p, cost = pick.cost, why = pick.why, idx = pick.idx }
+        total = total + pick.cost
+    end
+    return out, added, total
+end
+
+-- Spec 006, R20: seguindo uma quest sem ponto de objetivo, por quê? nil = não falta objetivo (vai entregar).
+function Leveling.NoPointReason(objectives, dungeon)
+    for _, o in ipairs(objectives or {}) do
+        if not o.done then return dungeon and "masmorra" or "sem coordenada" end
+    end
+    return nil
 end
 
 -- Spec 006, R13: objetivo espalhado. Ponto não visitado mais perto de `from`; com todos
@@ -397,13 +613,22 @@ local function asideReason(q, p)
         if Leveling.MobsTooHigh(o.avgLevel, p.playerLevel, q.state, p.mobTolerance) then high = max(high or 0, o.avgLevel) end
     end
     if high then return "mobs altos", math.ceil(high - (p.mobTolerance or Leveling.MAX_MOB_ABOVE)) end -- spec 031, R6
-    if q.elite then return "elite" end
-    if q.dungeon then return "dungeon" end
+    if q.dungeon then return q.group == "grupo" and "masmorra (em grupo)" or "dungeon" end -- spec 054, R3
+    if q.elite and q.group ~= "grupo" then return "elite" end
     if q.state == "pegar" and #(q.starters or {}) == 0 then return "sem coordenada" end
     if #(q.finishers or {}) == 0 then return "sem coordenada" end
     for _, o in ipairs(pending(q)) do
         if #(o.points or {}) == 0 then return "sem coordenada" end
     end
+    return nil
+end
+
+Leveling.AsideReason = asideReason -- spec 054, R3
+
+-- Spec 054, R1: quest de grupo? "masmorra", "elite" ou nil.
+function Leveling.GroupKind(elite, dungeon)
+    if dungeon then return "masmorra" end
+    if elite then return "elite" end
     return nil
 end
 
@@ -655,7 +880,9 @@ function Leveling.BuildCircuit(quests, start, p, dist)
             appendAll(all, pickStops)
             appendAll(all, objs)
             appendAll(all, laterStops)
-            local ordered, l, c = Leveling.NearestOrder(cursor, all, dist)
+            local ordered = Leveling.NearestOrder(cursor, all, dist)
+            local l, c
+            ordered, l, c = Leveling.Untangle(cursor, ordered, dist) -- spec 053, R3
             for _, st in ipairs(ordered) do st.round = ri end -- spec 006, R16
             appendAll(stops, ordered); legs, cursor = legs + l, c
         end

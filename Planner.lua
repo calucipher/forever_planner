@@ -124,7 +124,13 @@ function Planner.NextStep(q, from)
     if state == "pegar" then pts, label = D.StarterPoints(q), "Pegar"
     elseif state == "fazer" then pts, label = D.PendingObjectivePoints(q, UnitLevel("player")), "Objetivo"
     else pts, label = D.FinisherPoints(q), "Entregar" end
-    if (not pts or #pts == 0) and state == "fazer" then pts, label = D.FinisherPoints(q), "Entregar" end
+    if (not pts or #pts == 0) and state == "fazer" then
+        -- spec 006, R20: falta objetivo sem ponto (masmorra): não manda entregar
+        local objectives, _, dungeon = D.Objectives(q, UnitLevel("player"))
+        local why = ns.Leveling.NoPointReason(objectives, dungeon)
+        if why then return nil, why, state, dungeon end
+        pts, label = D.FinisherPoints(q), "Entregar"
+    end
     local p
     if label == "Objetivo" then
         Planner.visited[q] = Planner.visited[q] or {}
@@ -212,26 +218,44 @@ end
 ------------------------------------------------------------------------------------------
 -- GPS: seguir quest
 ------------------------------------------------------------------------------------------
+-- Devolve true quando a seta passou a seguir a quest (parecer 013-006: quem chama só diz "seguindo" aí).
 function Planner.Follow(q)
     local db = ns.FP.db
+    local player = Planner.PlayerPoint()
+    local p, label, _, dungeon = Planner.NextStep(q, player)
+    if not p and (label == "masmorra" or label == "sem coordenada") then -- spec 006, R20
+        local name = ns.Data.Q.name(q) or tostring(q)
+        -- só solta a seta se ela era desta quest; o hub seguido (db.guide) fica como estava
+        if db.following == q then db.following = nil; ns.Gps.Clear() end
+        if label == "masmorra" then
+            ns.FP.Print(string.format("%s: o que falta é dentro de masmorra%s; faça em grupo. A quest fica no log.%s",
+                name, Planner.DungeonWhere(dungeon), db.guide and "" or " 'Recalcular rota' volta ao guia."))
+        else
+            ns.FP.Print(name .. ": sem coordenada para o que falta. A quest fica no log.")
+        end
+        ns.FP.Fire("CHANGED")
+        return false
+    end
     if db.following ~= q then ns.FP.Fire("FOLLOW", "quest", q) end -- spec 036, R9 (só quando muda)
     db.following = q
     db.guide = nil -- seguir uma quest desliga o guia de hub (os dois brigavam pela seta)
     if ns.Guide then ns.Guide.current = nil end
-    local player = Planner.PlayerPoint()
-    local p, label = Planner.NextStep(q, player)
     if not p then
         ns.FP.Print("sem coordenadas para", ns.Data.Q.name(q) or q)
         ns.Gps.Clear()
-        return
+        return false
     end
     Planner.lastPoint = label == "Objetivo" and p or nil
     ns.FP.Debug(string.format("seguir quest %s: %s @%.1f,%.1f", tostring(q), label, p.x, p.y))
     local kind = ({ Pegar = "pegar", Entregar = "entregar" })[label] or "objetivo"
     local title = ns.Util.TargetTitle(kind, ns.Data.PointName(p), ns.Data.Q.name(q) or tostring(q))
-    if kind ~= "objetivo" then title = ns.Util.WithPlace(title, ns.Data.PointPlace(p)) end -- spec 021
+    if kind ~= "objetivo" then title = ns.Util.WithPlace(title, ns.Data.PointPlace(p)) -- spec 021
+    elseif type(p.source) == "string" and p.source:match("^o%d+$") then -- spec 013, R6
+        title = ns.Util.ObjectiveTitle(ns.Data.Q.name(q) or tostring(q), ns.Data.PointName(p))
+    end
     ns.Gps.SetTarget(p.mapID, p.x, p.y, title)
     ns.FP.Fire("CHANGED")
+    return true
 end
 
 -- Spec 014: quests que o jogo não ofereceu no NPC/objeto aberto saem do plano.
@@ -413,6 +437,25 @@ function Planner.FlightNodes(mapID)
     return list
 end
 
+-- Spec 052 (parecer 050-052): zona de cada ponto pela posição, só para quem pede (Guide), com cache
+-- por mapa e nó; sem mapa filho na posição (mapa de zona), a do mapa consultado. zoneOfMap = Guide.MapZone.
+local nodeZoneCache = {}
+function Planner.FlightNodesWithZone(mapID, zoneOfMap)
+    local list = Planner.FlightNodes(mapID)
+    for _, p in ipairs(list) do
+        local key = tostring(mapID) .. ":" .. tostring(p.id)
+        if nodeZoneCache[key] == nil then
+            local ok, z = pcall(function()
+                local info = C_Map.GetMapInfoAtPosition and C_Map.GetMapInfoAtPosition(mapID, p.x / 100, p.y / 100)
+                return zoneOfMap(info and info.mapID or mapID)
+            end)
+            if ok then nodeZoneCache[key] = z or false end -- erro (dados ainda carregando): tenta de novo depois
+        end
+        p.zone = nodeZoneCache[key] or nil
+    end
+    return list
+end
+
 -- Spec 044, R8 (emenda de 21/11/2026): pontos de voo conhecidos do mapa do continente, para a seta,
 -- a viagem real e o "seguir ponto de voo". Vem do que o mestre de voo mostrou (db.taxiKnown); sem
 -- isso, a lista do jogo, que no Forever não é confiável fora do mestre. Pontos 0–100 em cmap.
@@ -431,6 +474,19 @@ function Planner.KnownTaxiPoints(cmap)
     local ok, raw = pcall(T.GetAllTaxiNodes, cmap)
     if not ok or type(raw) ~= "table" then return {} end
     return ns.Util.TaxiPoints(raw, cmap, function(s) return s == states.Reachable or s == states.Current end)
+end
+
+-- Spec 006, R20: " (Razorfen Kraul, entrada em The Barrens 42.3, 89.9)" pela spec 041; vazio sem dados.
+function Planner.DungeonWhere(area)
+    if type(area) ~= "number" then return "" end
+    local ok, text = pcall(function()
+        local name = ns.Guide.AreaName(area)
+        if not name then return "" end
+        local d = ns.DungeonGuide and ns.DungeonGuide.ForActivity(name)
+        local e = d and ns.DungeonGuide.Nearest(d)
+        return e and string.format(" (%s, entrada em %s)", name, ns.DungeonGuide.Where(e)) or string.format(" (%s)", name)
+    end)
+    return ok and text or ""
 end
 
 -- Spec 018, R1/R3: seta no ponto de voo descoberto mais perto (API do jogo, continente do jogador).
@@ -453,8 +509,7 @@ function Planner.FollowBest()
     ns.FP.AfterCombat("followBest", function()
         local rows = Planner.Rank()
         if rows[1] then
-            Planner.Follow(rows[1].q)
-            ns.FP.Print("seguindo:", rows[1].name)
+            if Planner.Follow(rows[1].q) then ns.FP.Print("seguindo:", rows[1].name) end
         else
             ns.FP.Print("nenhuma quest elegível nesta zona.")
         end

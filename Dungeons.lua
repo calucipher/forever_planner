@@ -27,6 +27,19 @@ local function keyOf(name, aliases)
     return (aliases and aliases[n]) or n
 end
 
+-- Spec 054, R4: quests { name, dungeon } agrupadas pela chave da masmorra, na ordem de entrada.
+function Dungeons.QuestsByDungeon(entries, aliases)
+    local out = {}
+    for _, e in ipairs(entries or {}) do
+        local k = keyOf(e.dungeon, aliases)
+        if k ~= "" then
+            out[k] = out[k] or {}
+            table.insert(out[k], e)
+        end
+    end
+    return out
+end
+
 local function copyPoint(p, extra)
     local e = { c = p.c, x = p.x, y = p.y, m = p.m, mx = p.mx, my = p.my }
     for k, v in pairs(extra or {}) do e[k] = v end

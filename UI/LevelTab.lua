@@ -215,4 +215,5 @@ local function build(panel)
     return api
 end
 
-ns.UI.RegisterTab("level", "Level", build)
+-- Spec 047 (emenda de 21/11/2026): o painel Level vive dentro da aba Quests (UI/QuestsTab.lua).
+ns.LevelPanel = build

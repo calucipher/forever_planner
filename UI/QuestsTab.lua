@@ -1,15 +1,16 @@
 -- UI/QuestsTab.lua: ranking de quests da zona. Clique numa linha = GPS segue a quest.
+-- Spec 047 (emenda de 21/11/2026): a aba tem duas seções, Quests e Level (o painel da spec 035).
 local _, ns = ...
 local Theme, Util = ns.Theme, ns.Util
 
-local ROW_H, VISIBLE = 30, 10
+local ROW_H, VISIBLE = 30, 9 -- 9: a barra de seções (Quests | Level) ocupa uma linha
 
 local columns = { -- x, largura, título
     { 6, 62, "" }, { 72, 28, "Nv" }, { 102, 200, "Quest" }, { 304, 64, "XP" },
     { 370, 46, "Min" }, { 418, 60, "XP/min" }, { 480, 92, "Upgrade" },
 }
 
-local function build(panel)
+local function buildQuests(panel)
     local api, rows, data, offset = {}, {}, {}, 0
 
     -- Barra de ações
@@ -161,6 +162,42 @@ local function build(panel)
         ns.UI.SetStatus(t and ("|cFF73E65AGPS:|r " .. t.title) or "GPS parado. Clique numa quest ou em Seguir a melhor.")
         render()
     end
+    return api
+end
+
+-- Seções da aba: Quests (o ranking) e Level (o painel da spec 035, em UI/LevelTab.lua).
+local SECTIONS = { { id = "quests", label = "Quests", build = buildQuests }, { id = "level", label = "Level" } }
+local function build(panel)
+    local api, subs, buttons = {}, {}, {}
+    local current
+    local function select(id)
+        current = id
+        ns.FP.db.ui.questsSection = id
+        for _, s in ipairs(SECTIONS) do
+            local on = s.id == id
+            if on and not subs[id] then
+                local f = CreateFrame("Frame", nil, panel)
+                f:SetPoint("TOPLEFT", 0, -30); f:SetPoint("BOTTOMRIGHT")
+                local builder = s.build or ns.LevelPanel
+                subs[id] = { frame = f, api = builder(f) or {} }
+            end
+            if subs[s.id] then subs[s.id].frame:SetShown(on) end
+            buttons[s.id]:SetAlpha(on and 1 or 0.55)
+        end
+        api.Refresh()
+    end
+    local x = 0
+    for _, s in ipairs(SECTIONS) do
+        local b = Theme.Button(panel, s.label, 90, 22, function() select(s.id) end, "primary")
+        b:SetPoint("TOPLEFT", x, -2)
+        buttons[s.id] = b
+        x = x + 94
+    end
+    function api.Refresh()
+        local sub = current and subs[current]
+        if sub and sub.api.Refresh then sub.api.Refresh() end
+    end
+    select(ns.FP.db.ui.questsSection == "level" and "level" or "quests")
     return api
 end
 

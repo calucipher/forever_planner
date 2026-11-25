@@ -25,7 +25,8 @@ function Auto.ChooseReward(choices)
     return best or (choices[1] and choices[1].index) or 1
 end
 
-local function enabled() return ns.FP.db and ns.FP.db.auto end
+local function enabled() return ns.FP.db and ns.FP.db.auto ~= false end
+local function on(key) return ns.FP.db[key] ~= false end -- spec 058, R2: chaves ligadas por padrão
 
 -- Relevante para o planejador (R1). Sem a QuestieDB não dá para saber: não aceita.
 local function relevant(q)
@@ -33,14 +34,63 @@ local function relevant(q)
     return q and q > 0 and ns.Data.Q ~= nil and ns.Data.IsRelevant(q, UnitLevel("player"))
 end
 
+-- Spec 058, R3 (pura): relevante e no plano.
+function Auto.ShouldAccept(q, plan, isRelevant)
+    return (plan and plan[q] == true and isRelevant(q)) and true or false
+end
+
+-- Spec 058, R4: entregues nos últimos 60 s; a continuação delas também é do plano.
+local RECENT = 60
+local recent = {}
+ns.FP.On("QUEST_TURNED_IN", function(q) q = Util.Num(q); if q then recent[q] = _G.GetTime() end end)
+local function plan()
+    local set = ns.Guide and ns.Guide.PlanQuests and ns.Guide.PlanQuests() or {}
+    local now = _G.GetTime()
+    for q, t in pairs(recent) do
+        if now - t > RECENT then recent[q] = nil
+        else
+            local n = ns.Data.NextInChain(q)
+            if n then set[n] = true end
+        end
+    end
+    return set
+end
+-- A quest oferecida que exige uma das entregues agora também é continuação.
+local function wanted(q)
+    q = Util.Num(q)
+    if not relevant(q) then return false end -- parecer 057-058: sem a QuestieDB, nada de erro no diálogo
+    local set = plan()
+    if not set[q] then
+        for _, p in ipairs(ns.Data.Prerequisites(q) or {}) do
+            if recent[p] then
+                -- R4: continuação por pré-requisito, se não for de grupo (masmorra ou elite fica com o jogador)
+                local _, elite, dungeon = ns.Data.Objectives(q, UnitLevel("player"))
+                if not ns.Leveling.GroupKind(elite, dungeon) then set[q] = true end
+                break
+            end
+        end
+    end
+    return Auto.ShouldAccept(q, set, relevant)
+end
+local warned = {}
+local function skipNote(q)
+    q = Util.Num(q)
+    if q and relevant(q) and not warned[q] then -- R5: uma vez por quest e sessão
+        warned[q] = true
+        ns.FP.Print(string.format("não aceitei %s: fora do plano (aceite na mão se quiser).", ns.Data.Q.name(q) or tostring(q)))
+    end
+end
+
 local function onDetail()
     if _G.QuestGetAutoAccept and _G.QuestGetAutoAccept() then return end -- o jogo já aceitou
+    if not on("autoAccept") then return end
     local q = GetQuestID()
-    if relevant(q) then _G.AcceptQuest(); ns.FP.Debug("auto: aceitou " .. tostring(q))
-    else ns.FP.Debug("auto: não aceitou " .. tostring(q) .. " (não relevante)") end
+    if wanted(q) then _G.AcceptQuest(); ns.FP.Debug("auto: aceitou " .. tostring(q))
+    else skipNote(q); ns.FP.Debug("auto: não aceitou " .. tostring(q) .. " (fora do plano)") end
 end
 
 local function onProgress()
+    if not on("autoTurnIn") then return end
     if _G.IsQuestCompletable() and (Util.Num(_G.GetQuestMoneyToGet()) or 0) == 0 then -- R2, R3
         _G.CompleteQuest(); ns.FP.Debug("auto: completou " .. tostring(GetQuestID()))
     end
@@ -49,8 +99,10 @@ end
 local function itemID(link) return link and tonumber(link:match("item:(%d+)")) end
 
 local function onComplete(tries)
+    if not on("autoTurnIn") then return end
     local n = _G.GetNumQuestChoices() or 0
     if n <= 1 then _G.GetQuestReward(n == 1 and 1 or nil); return end
+    if not on("autoReward") then return end -- spec 058, R2: a escolha fica com o jogador
     local choices, loading = {}, false
     for i = 1, n do
         local link = _G.GetQuestItemLink("choice", i)
@@ -79,23 +131,31 @@ end
 local function onGossip()
     local G = _G.C_GossipInfo
     if not G then return end
-    for _, info in ipairs(G.GetActiveQuests() or {}) do
-        if info.isComplete then G.SelectActiveQuest(info.questID); return end
+    if on("autoTurnIn") then
+        for _, info in ipairs(G.GetActiveQuests() or {}) do
+            if info.isComplete then G.SelectActiveQuest(info.questID); return end
+        end
     end
+    if not on("autoAccept") then return end
     for _, info in ipairs(G.GetAvailableQuests() or {}) do
-        if relevant(info.questID) then G.SelectAvailableQuest(info.questID); return end
+        if wanted(info.questID) then G.SelectAvailableQuest(info.questID); return end
+        skipNote(info.questID)
     end
 end
 
 -- NPC com a janela antiga de saudação (sem gossip)
 local function onGreeting()
-    for i = 1, (_G.GetNumActiveQuests and _G.GetNumActiveQuests() or 0) do
-        local _, isComplete = _G.GetActiveTitle(i)
-        if isComplete then _G.SelectActiveQuest(i); return end
+    if on("autoTurnIn") then
+        for i = 1, (_G.GetNumActiveQuests and _G.GetNumActiveQuests() or 0) do
+            local _, isComplete = _G.GetActiveTitle(i)
+            if isComplete then _G.SelectActiveQuest(i); return end
+        end
     end
+    if not on("autoAccept") then return end
     for i = 1, (_G.GetNumAvailableQuests and _G.GetNumAvailableQuests() or 0) do
         local questID = _G.GetAvailableQuestInfo and select(5, _G.GetAvailableQuestInfo(i))
-        if relevant(questID) then _G.SelectAvailableQuest(i); return end
+        if wanted(questID) then _G.SelectAvailableQuest(i); return end
+        skipNote(questID)
     end
 end
 
@@ -110,7 +170,7 @@ end)
 
 -- R7
 function Auto.Toggle()
-    ns.FP.db.auto = not ns.FP.db.auto
+    ns.FP.db.auto = ns.FP.db.auto == false -- spec 058: nil conta como ligado
     ns.FP.Print(ns.FP.db.auto and "auto accept/turn-in ligado." or "auto accept/turn-in desligado.")
 end
 

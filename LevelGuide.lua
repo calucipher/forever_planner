@@ -53,8 +53,10 @@ local function hearth()
     local start, duration = 0, 0
     local cd = (_G.C_Container and _G.C_Container.GetItemCooldown) or _G.GetItemCooldown
     if cd then start, duration = cd(HEARTHSTONE) end
-    local ready = (start or 0) == 0 or (_G.GetTime and _G.GetTime() >= (start or 0) + (duration or 0))
-    return { ready = ready, to = world(bind), name = name }
+    local now = _G.GetTime and _G.GetTime() or 0
+    local ready = (start or 0) == 0 or now >= (start or 0) + (duration or 0)
+    local left = not ready and ((start or 0) + (duration or 0) - now) or nil -- spec 056, R1
+    return { ready = ready, left = left, to = world(bind), name = name }
 end
 
 -- Spec 036, R18: o medido no jogo (Content/Measured.lua) substitui a estimativa, campo a campo.
@@ -237,6 +239,87 @@ local function offerOf(zone, L, cat, p, adv)
     return o, math.max(o.value + o.unlock, ahead.value)
 end
 
+------------------------------------------------------------------------------------------
+-- Trilha por faixa (spec 047): catálogo + viagem real + pontos de voo + lar
+------------------------------------------------------------------------------------------
+local function mostQuestsHub(map)
+    local best
+    for _, h in ipairs(ns.Guide.Hubs(map)) do
+        if not best or #h.questList > #best.questList then best = h end
+    end
+    return best
+end
+
+-- R5: estalajadeiro mais perto do hub com mais quests da zona recomendada; nil se o lar já é lá.
+local function hearthFor(zone)
+    local map = zone and zone.map
+    local hub = map and mostQuestsHub(map)
+    local from = hub and hub.points[1]
+    if not from then return nil end
+    local inn = ns.Planner.Nearest(from, ns.Data.Innkeepers((_G.UnitFactionGroup("player"))))
+    if not inn then return nil end
+    local place = ns.Data.PointPlace(inn)
+    local bind = _G.GetBindLocation and _G.GetBindLocation()
+    if bind and place and place:find(bind, 1, true) then return nil end -- o lar já é lá
+    return { point = inn, name = inn.name, place = place }
+end
+
+-- R2–R5: a trilha da faixa de L. yield, opcional, a cada zona.
+function LevelGuide.Trail(L, yield)
+    local D, G, Z = ns.Data, ns.Guide, ns.Zones
+    local cat = D.zoneCatalog
+    if not (cat and D.Q and D.ready) then return nil end
+    L = L or UnitLevel("player")
+    local lo, hi = Z.Bracket(L)
+    local _, hereMap = G.PlayerArea()
+    local player = ns.Planner.PlayerPoint() or { mapID = hereMap }
+    local pw = world(player)
+    local ctx = travelContexts(hereMap)
+    local zones = {}
+    for zone, z in pairs(cat.zones) do
+        local zlo, zhi = G.ZoneLevels(zone)
+        local map = D.areaToMap[zone]
+        if zlo and map then
+            local n, xp = 0, 0
+            for _, q in ipairs(z.quests or {}) do
+                local info = cat.info[q]
+                if info and info.solo and info.level >= lo and info.level <= hi and not D.IsCompleted(q) then
+                    n, xp = n + 1, xp + (info.xp or 0)
+                end
+            end
+            if n > 0 then
+                local hub = mostQuestsHub(map)
+                local dest = hub and hub.points[1]
+                local dw = dest and world(dest)
+                local plan = pw and dw and ns.Travel.Plan(pw, dw, ctx) -- R3: as regras da seta e dos voos
+                local red = 0
+                for _, p in ipairs(ns.Planner.FlightNodes(map)) do if p.known == false then red = red + 1 end end
+                zones[#zones + 1] = { zone = zone, map = map, lo = zlo, hi = zhi, quests = n, xp = xp,
+                    travel = plan and plan.seconds, plan = plan, dest = dest, red = red }
+            end
+        end
+        if yield then yield() end
+    end
+    local steps = Z.Trail(zones, lo, hi)
+    local current = steps[1]
+    for _, st in ipairs(steps) do
+        local z = st.zones[1]
+        if z.lo <= L and z.hi >= L then current = st; break end
+    end
+    local dungeons = {}
+    for _, d in ipairs(ns.DungeonGuide.List() or {}) do
+        local a = d.best or d.act
+        local dlo = a and (a.minLevelSuggestion or a.minLevel)
+        if dlo and dlo >= lo and dlo <= hi then dungeons[#dungeons + 1] = d end
+    end
+    table.sort(dungeons, function(a, b)
+        local x, y = a.best or a.act, b.best or b.act
+        return (x.minLevelSuggestion or 0) < (y.minLevelSuggestion or 0)
+    end)
+    return { lo = lo, hi = hi, level = L, steps = steps, current = current, dungeons = dungeons,
+        hearth = current and hearthFor(current.zones[1]) or nil }
+end
+
 -- Cálculo completo, síncrono (os testes chamam direto). yield, opcional, a cada hub e a cada zona.
 function LevelGuide.Compute(yield)
     local D, G, Z = ns.Data, ns.Guide, ns.Zones
@@ -344,7 +427,7 @@ local function cacheKey()
     return table.concat({ UnitLevel("player"), state.turnIns, tostring(ns.Guide.PlayerArea()), #ns.Data.LogQuests(),
         readyCount(),
         tostring(ns.Data.zoneCatalog ~= nil), tostring(p.mapID), math.floor((p.x or 0) / 5), math.floor((p.y or 0) / 5),
-        tostring(h and h.ready) }, ":")
+        tostring(h and h.ready), h and h.left and math.floor(h.left / 60) or "-" }, ":") -- spec 056: a espera muda por minuto
 end
 
 function LevelGuide.Refresh(force)
@@ -397,6 +480,10 @@ function LevelGuide.FollowTrip(t)
         local zoneName = ns.Guide.AreaName(t.zone)
         local after = t.after or zoneName -- R20: na entrega, "entregar Quest"
         local db = ns.FP.db
+        if leg and leg.kind == "esperar" then -- spec 056: esperar a pedra compensa mais que andar
+            ns.FP.Print(leg.label .. " e use; ir a pé leva mais. Depois " .. (t.questID and "use /fp entregar de novo." or ("clique de novo em " .. zoneName .. ".")))
+            return
+        end
         if leg and leg.kind == "lar" then
             if t.questID then db.guide, db.following, ns.Guide.current = nil, nil, nil end -- parecer: o hub puxaria a seta
             ns.FP.Print("use a pedra de lar (" .. tostring(leg.label) .. "); depois " .. (t.questID and "use /fp entregar de novo." or ("clique de novo em " .. zoneName .. ".")))
@@ -417,6 +504,8 @@ function LevelGuide.FollowTrip(t)
         db.guide, db.following = nil, nil
         ns.Guide.current = nil
         ns.Gps.SetTarget(mapID, x, y, title)
+        ns.Guide.tripQuest = t.questID -- spec 058, R4: a entrega da viagem é do plano
+        if leg and leg.kind == "voar" and leg.to then ns.Gps.taxiHint = leg.to.name end -- spec 057, R2
         if t.questID then
             ns.FP.Fire("FOLLOW", "entrega", t.questID) -- R20: no diário, a entrega e não "trip"
         else

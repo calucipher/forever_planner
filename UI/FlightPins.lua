@@ -134,6 +134,48 @@ local function learn()
     if changed then ns.FP.Fire("TAXI_KNOWN") end -- spec 045, R6: o circuito tira a parada aberta
 end
 
+-- Spec 057, R2–R4: destaca o destino da seta na janela de voo; com voo auto, voa.
+local glow, marked
+local function unmark() -- parecer 057-058: os TaxiButton são reaproveitados por índice
+    if marked then marked:UnlockHighlight(); marked = nil end
+    if glow then glow:Hide() end
+end
+local function markDestination()
+    local db = ns.FP.db
+    unmark()
+    if db.taxiMark == false and db.taxiAuto ~= true then return end
+    if not ns.Gps.target then return end -- sem alvo da seta, nada a marcar
+    local leg = ns.Gps.leg
+    local target = (leg and leg.to and leg.to.name) or ns.Gps.taxiHint
+    if not (target and _G.NumTaxiNodes and _G.TaxiNodeName) then return end
+    local names = {}
+    for i = 1, _G.NumTaxiNodes() do names[i] = _G.TaxiNodeName(i) end
+    local idx = ns.Util.TaxiPick(names, target)
+    if not idx then ns.FP.Debug("voos: destino " .. tostring(target) .. " fora da janela"); return end
+    if _G.TaxiNodeGetType and _G.TaxiNodeGetType(idx) ~= "REACHABLE" then return end
+    local button = _G["TaxiButton" .. idx]
+    if db.taxiMark ~= false and button then
+        button:LockHighlight(); marked = button
+        if _G.TaxiNodeOnButtonEnter then _G.TaxiNodeOnButtonEnter(button) end -- rota desenhada e tooltip
+        if not glow then
+            glow = CreateFrame("Frame", nil, button:GetParent())
+            local tex = glow:CreateTexture(nil, "OVERLAY")
+            tex:SetAllPoints(); tex:SetTexture("Interface\\Buttons\\CheckButtonGlow"); tex:SetBlendMode("ADD")
+            glow:SetSize(44, 44)
+        end
+        glow:SetParent(button:GetParent()); glow:ClearAllPoints(); glow:SetPoint("CENTER", button); glow:Show()
+        ns.FP.Print("voo marcado: " .. names[idx])
+    end
+    if db.taxiAuto == true and _G.TakeTaxiNode then
+        C_Timer.After(0.5, function()
+            local frame = _G.TaxiFrame
+            if not (frame and frame:IsShown()) or _G.TaxiNodeName(idx) ~= names[idx] then return end -- parecer
+            ns.FP.Print("voando para " .. names[idx])
+            _G.TakeTaxiNode(idx)
+        end)
+    end
+end
+
 -- R5: ponto recém-descoberto fica verde sem /reload.
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
@@ -148,7 +190,12 @@ loader:SetScript("OnEvent", function(_, event, name)
     if event == "TAXIMAP_OPENED" then -- R7: só com a janela de voo aberta
         local ok, err = pcall(learn)
         if not ok then ns.FP.Debug("voos: aprender falhou: " .. tostring(err)) end
+        C_Timer.After(0.1, function() -- spec 057: depois do TaxiFrame_OnShow, que posiciona os botões
+            local okM, errM = pcall(markDestination)
+            if not okM then ns.FP.Debug("voos: marcar destino falhou: " .. tostring(errM)) end
+        end)
     end
+    if event == "TAXIMAP_CLOSED" then unmark(); if _G.GameTooltip then _G.GameTooltip:Hide() end end
     lastMap = nil
 end)
 ns.FP.On("DB_READY", build)

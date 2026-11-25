@@ -5,7 +5,7 @@ local _, ns = ...
 local Commands = {}
 ns.Commands = Commands
 
-Commands.sections = { "Rota", "Personagem", "Grupo", "Interface", "Registro" }
+Commands.sections = { "Rota", "Automações", "Personagem", "Grupo", "Interface", "Registro" } -- spec 058, R1
 
 local function FP() return ns.FP end
 local function db() return ns.FP.db end
@@ -20,6 +20,22 @@ function Commands.Positive(v)
     local n = tonumber(v)
     if not n or n <= 0 then return nil end
     return n
+end
+
+-- Spec 058, R2: chave de automação guardada em db[key]; on = ligada por padrão (nil conta como on).
+local function toggle(id, label, key, on, tip)
+    local function state()
+        local v = db()[key]
+        if on then return v ~= false end
+        return v == true
+    end
+    return { id = id, label = label, section = "Automações", kind = "liga", tip = tip, state = state,
+        run = function()
+            db()[key] = not state()
+            FP().Print(label .. ": " .. (state() and "ligado" or "desligado") .. ".")
+            if ns.Guide then ns.Guide.Invalidate() end
+            FP().Fire("CHANGED")
+        end }
 end
 
 local function stopGps() ns.Gps.Clear(); db().following = nil; db().guide = nil; FP().Fire("CHANGED") end
@@ -102,6 +118,31 @@ end
 
 local function onOff(v) return v and "ligado" or "desligado" end
 
+-- Spec 047, R7 e R8: a trilha no chat, calculada em corrotina e fora de combate.
+local function printTrail(L)
+    local started = FP().RunCoroutine("trailCmd", function(yield) return ns.LevelGuide.Trail(L, yield) end, function(ok, tr)
+        if not ok then FP().Debug("trilha falhou: " .. tostring(tr)); tr = nil end
+        if not tr then FP().Print("trilha: o catálogo de zonas ainda está carregando."); return end
+        FP().Print(string.format("trilha %d–%d (estimativa):", tr.lo, tr.hi))
+        if #tr.steps == 0 then FP().Print("  nenhuma zona com quests da sua facção nesta faixa.") end
+        for i, st in ipairs(tr.steps) do
+            for j, z in ipairs(st.zones) do
+                FP().Print(string.format("  %s%s (%s) · %d quests · %s%s", j == 1 and (i .. ". ") or "   ou ",
+                    ns.Guide.AreaName(z.zone), ns.Zones.FormatRange(z.lo, z.hi), z.quests,
+                    z.plan and ns.Travel.Describe(z.plan) or "viagem ?",
+                    z.red > 0 and string.format(" · %d ponto(s) de voo a abrir", z.red) or ""))
+            end
+        end
+        if tr.hearth then FP().Print("  marque o lar: " .. tostring(tr.hearth.name) .. (tr.hearth.place and (", " .. tr.hearth.place) or "")) end
+        if #tr.dungeons > 0 then
+            local names = {}
+            for _, d in ipairs(tr.dungeons) do names[#names + 1] = d.name end
+            FP().Print("  masmorras: " .. table.concat(names, ", "))
+        end
+    end)
+    if not started then FP().Print("trilha: já calculando; aguarde.") end
+end
+
 -- R1: { id, label, tip, section, kind, run(rest), state(), input, arg, value(), confirma }
 -- confirma: a ação abre uma confirmação; a resposta dela sai no chat (R4a).
 Commands.list = {
@@ -121,6 +162,18 @@ Commands.list = {
         tip = "Mostra quests que não valem a pena; abandona só se você confirmar", run = function() ns.QuickMenu.ShowCleanup() end },
     { id = "zonas", label = "Zonas", section = "Rota", kind = "lista",
         tip = "Sugestão de zona (ficar, trocar ou grind) e a faixa de nível de cada zona", run = function() ns.Guide.PrintZones() end },
+    { id = "trilha", label = "Trilha da faixa", section = "Rota", kind = "lista", arg = "[nível]",
+        tip = "Zonas da faixa de nível em ordem, com alternativas, viagem, pontos de voo e lar (spec 047)",
+        run = function(rest) printTrail(tonumber(rest)) end },
+    { id = "passagens", label = "Passagens da zona", section = "Rota", kind = "lista", arg = "[limpar]",
+        tip = "Passagens a pé desta zona para as vizinhas (estrada, relevo ou aprendida); 'limpar' apaga as aprendidas (spec 049)",
+        run = function(rest) ns.Gps.PrintGates(rest) end },
+    { id = "gear", label = "Gear", section = "Personagem", kind = "lista",
+        tip = "Melhor upgrade por slot até 3 níveis à frente: quest, cadeia, masmorra, vendedor ou AH (spec 048)",
+        run = function() ns.GearGuide.Print() end },
+    { id = "grupo quests", label = "Quests de grupo", section = "Rota", kind = "lista", arg = "[limpar]",
+        tip = "Quests de elite ou masmorra do log e a escolha de cada uma (pular ou fazer em grupo); 'limpar' pergunta de novo (spec 054)",
+        run = function(rest) ns.Guide.PrintGroupQuests(rest) end },
     { id = "indisponiveis", label = "Indisponíveis", section = "Rota", kind = "lista",
         tip = "Quests que o jogo não ofereceu e saíram do plano", run = listUnavailable },
     { id = "indisponiveis limpar", label = "Reativar quests", section = "Rota", kind = "acao",
@@ -147,6 +200,15 @@ Commands.list = {
         tip = "Lista as quests de classe e segue a melhor", run = function() ns.ClassGuide.PrintList(); ns.ClassGuide.Follow() end },
     { id = "armas", label = "Armas", section = "Personagem", kind = "acao",
         tip = "Escolhe as armas que você usa e aponta a seta para o treinador", run = function() ns.QuickMenu.ShowWeapons() end },
+    { id = "treinar", label = "Treinar", section = "Personagem", kind = "acao",
+        tip = "Seta no treinador da classe mais perto e a lista do que falta aprender, com os novos do Forever (spec 051)",
+        run = function() ns.ClassGuide.FollowClassTrainer() end },
+    { id = "treinar tudo", label = "Treinar tudo", section = "Personagem", kind = "acao",
+        tip = "Com a janela do treinador aberta, compra todos os feitiços disponíveis que o dinheiro der (spec 055)",
+        run = function() ns.ClassGuide.TrainAll() end },
+    { id = "ranks", label = "Ranks velhos na barra", section = "Personagem", kind = "lista", arg = "[trocar]",
+        tip = "Botões da barra com rank velho de feitiço; 'trocar' põe o rank novo (fora de combate) (spec 055)",
+        run = function(rest) ns.ClassGuide.Ranks(rest) end },
     { id = "marcos", label = "Marcos da classe", section = "Personagem", kind = "lista",
         tip = "Feitiços e armas por nível da sua classe", run = function() ns.ClassGuide.PrintMilestones(); ns.ClassGuide.WarnWeapons() end },
     { id = "macros", label = "Feitiços das macros", section = "Personagem", kind = "lista",
@@ -181,9 +243,19 @@ Commands.list = {
     { id = "lfg copiar", label = "LFG só copia", section = "Grupo", kind = "acao",
         tip = "'Chamar' passa a só copiar o texto", run = function() ns.LfgPanel.Command("copiar") end },
     -- Interface
-    { id = "auto", label = "Aceitar e entregar sozinho", section = "Interface", kind = "liga",
-        tip = "Aceita e entrega quest do plano sem clicar", run = function() ns.Auto.Toggle() end,
-        state = function() return db().auto == true end },
+    -- Automações (spec 058)
+    { id = "auto", label = "Automações de quest (geral)", section = "Automações", kind = "liga",
+        tip = "Chave geral: desligada, não aceita, não entrega e não escolhe recompensa", run = function() ns.Auto.Toggle() end,
+        state = function() return db().auto ~= false end },
+    toggle("auto aceitar", "Aceitar sozinho", "autoAccept", true, "Aceita só as quests do plano: hubs da zona, a seguida e a continuação da que você entregou"),
+    toggle("auto entregar", "Entregar sozinho", "autoTurnIn", true, "Completa e entrega a quest pronta"),
+    toggle("auto recompensa", "Escolher recompensa", "autoReward", true, "Escolhe o maior upgrade entre as recompensas"),
+    toggle("auto seguir", "Seguir a próxima", "autoNext", true, "Depois de entregar, a seta segue a próxima quest ou hub"),
+    toggle("auto grupo", "Perguntar quest de grupo", "groupAsk", true, "Ao aceitar quest de elite ou masmorra, pergunta: pular ou fazer em grupo (spec 054)"),
+    toggle("auto voo rota", "Abrir pontos de voo na rota", "flightStops", true, "Paradas 'Abrir ponto de voo' no circuito (spec 052)"),
+    toggle("auto entrega caminho", "Entrega no caminho", "turnInsOnTheWay", true, "Quest pronta de outro hub com o NPC no caminho entra no circuito (spec 053)"),
+    toggle("voo marcar", "Marcar o destino do voo", "taxiMark", true, "Ao abrir o mestre de voo, destaca o destino da seta (spec 057)"),
+    toggle("voo auto", "Voar sozinho", "taxiAuto", false, "Ao abrir o mestre de voo, voa para o destino marcado (spec 057)"),
     { id = "minimapa", label = "Botão no minimapa", section = "Interface", kind = "liga", alias = { "minimap" },
         tip = "Mostra ou esconde o botão no minimapa", run = function() ns.MinimapButton.Toggle() end,
         state = function() return not (db().minimap and db().minimap.hide) end },
@@ -225,6 +297,9 @@ Commands.list = {
         state = function() return db().debugChat == true end },
     { id = "diag", label = "Diagnóstico", section = "Registro", kind = "lista",
         tip = "Estado dos dados e do cálculo, para relatar problema", run = function() ns.DebugTools.Diag() end },
+    { id = "cena", label = "Gravar cena de voo", section = "Registro", kind = "acao",
+        tip = "Grava a situação do último cálculo de ponto de voo para virar teste (spec 052); depois /reload",
+        run = function() ns.Guide.SaveScene() end },
 }
 
 local function trim(s) return ((s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end

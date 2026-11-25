@@ -327,6 +327,7 @@ local EVENTS = {
     -- Sem COMBAT_LOG_EVENT_UNFILTERED: com ele, o cliente mostrou "blocked from an action" (13/11/2026).
     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "LOOT_OPENED", "TIME_PLAYED_MSG", "PLAYER_LOGOUT",
     { "LEARNED_SPELL_IN_SKILL_LINE", "LEARNED_SPELL_IN_TAB" }, -- renomeado no Mainline 11.0
+    "TRAINER_SHOW", -- spec 055, R2
 }
 FP.missingEvents = {}
 local frame = CreateFrame("Frame")
@@ -426,10 +427,14 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         FP.Fire("CHANGED")
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         if ns.Scoring then ns.Scoring.ClearEquippedCache() end
+        FP.Fire("EQUIPMENT") -- spec 048, R8
         FP.Fire("CHANGED")
     elseif event == "LEARNED_SPELL_IN_SKILL_LINE" or event == "LEARNED_SPELL_IN_TAB" or event == "SPELLS_CHANGED" then
         FP.Fire("SPELLS") -- macros FP acompanham o que você aprende (spec 003, R7)
+        if event ~= "SPELLS_CHANGED" then FP.Fire("LEARNED") end -- spec 055, R5
         FP.Fire("CHANGED")
+    elseif event == "TRAINER_SHOW" then
+        FP.Fire("TRAINER_SHOW")
     elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
         OnXPGain(arg1)
     elseif event == "GET_ITEM_INFO_RECEIVED" then

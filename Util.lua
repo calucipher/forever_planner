@@ -141,7 +141,10 @@ function Util.FlightNodes(nodes, faction, F, known)
         local p = n.position
         local mine = n.faction == F.Neutral or (n.faction == F.Horde and faction == "Horde")
             or (n.faction == F.Alliance and faction == "Alliance")
-        if mine and p and p.x and p.y then
+        local retired = type(n.name) == "string" and n.name:find("^zz") -- R1b: ponto desativado
+        -- R1c: fora do mapa consultado (o jogo devolve o continente inteiro num mapa de cidade)
+        local inside = p and p.x and p.y and p.x >= 0 and p.x <= 1 and p.y >= 0 and p.y <= 1
+        if mine and inside and not retired then
             local isKnown -- nil: a conferir
             if n.isUndiscovered then isKnown = false
             elseif known then isKnown = known[n.nodeID] == true end
@@ -213,6 +216,36 @@ function Util.TargetTitle(kind, target, text)
         return verb .. (kind == "pegar" and " com " or " a ") .. target .. ": " .. text
     end
     return verb .. ": " .. text
+end
+
+-- Spec 006, R20 (parecer 013-006-masmorra): área da masmorra quando TODOS os spawns de todas as
+-- listas ({ [areaId] = pontos }) ficam em masmorra; false se alguma fonte nasce no mundo (veio, erva, baú).
+function Util.DungeonOnly(spawnLists, dungeons)
+    local area
+    for _, spawns in ipairs(spawnLists or {}) do
+        for a in pairs(spawns or {}) do
+            if not (dungeons and dungeons[a]) then return false end
+            area = area or a
+        end
+    end
+    return area or false
+end
+
+-- Spec 057, R1: índice do destino pelo nome; sem igual, pelo nome antes da vírgula (sem maiúscula).
+function Util.TaxiPick(names, target)
+    if not target then return nil end
+    for i, n in ipairs(names or {}) do if n == target then return i end end
+    local function head(s) return (tostring(s):match("^([^,]+)") or ""):lower():gsub("^%s+", ""):gsub("%s+$", "") end
+    local t = head(target)
+    for i, n in ipairs(names or {}) do if head(n) == t then return i end end
+    return nil
+end
+
+-- Spec 013, R6 (emenda de 24/11/2026): objetivo num objeto diz o que pegar.
+function Util.ObjectiveTitle(label, object)
+    local title = "Objetivo: " .. tostring(label or "?")
+    if object and object ~= "" then title = title .. " · pegue: " .. object end
+    return title
 end
 
 -- Spec 023, R1: campo de quest com a correção curada por cima da QuestieDB.

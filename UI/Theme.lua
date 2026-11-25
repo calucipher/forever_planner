@@ -105,4 +105,55 @@ function Theme.ScrollArea(parent)
     return sf
 end
 
+-- Lista de linhas de texto com clique e tooltip, dentro de um painel com rolagem (abas Trilha e
+-- Gear). Cada linha: { text, action, tip = { título, linhas... }, hint, link }. Devolve render(list).
+function Theme.LineList(box, rowH)
+    rowH = rowH or 18
+    local scroll = Theme.ScrollArea(box)
+    scroll:SetPoint("TOPLEFT", 8, -6); scroll:SetPoint("BOTTOMRIGHT", -8, 6)
+    local rows = {}
+    local function showTip(row)
+        local d = row.data
+        if not (d and (d.tip or d.link)) then return end
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        if d.link then GameTooltip:SetHyperlink(d.link) end
+        for i, line in ipairs(d.tip or {}) do
+            if i == 1 and not d.link then GameTooltip:AddLine(line, 1, 1, 1) else GameTooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+        end
+        if d.action then GameTooltip:AddLine(d.hint or "Clique: seguir", 0.6, 0.6, 0.7) end
+        GameTooltip:Show()
+    end
+    local function row(i)
+        local r = rows[i]
+        if r then return r end
+        r = CreateFrame("Button", nil, scroll.child, "BackdropTemplate")
+        r:SetHeight(rowH)
+        Theme.Backdrop(r, { 0, 0, 0, 0 })
+        r.text = Theme.Text(r, 11, Theme.c.text)
+        r.text:SetPoint("LEFT", 2, 0); r.text:SetPoint("RIGHT", -2, 0)
+        r.text:SetJustifyH("LEFT"); r.text:SetWordWrap(false)
+        r:SetScript("OnClick", function(self) if self.data and self.data.action then self.data.action() end end)
+        r:SetScript("OnEnter", function(self)
+            if self.data and self.data.action then self:SetBackdropColor(unpack(Theme.c.hover)) end
+            showTip(self)
+        end)
+        r:SetScript("OnLeave", function(self) self:SetBackdropColor(0, 0, 0, 0); GameTooltip:Hide() end)
+        rows[i] = r
+        return r
+    end
+    return function(list)
+        for i, d in ipairs(list) do
+            local r = row(i)
+            r.data = d
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", 0, -(i - 1) * rowH); r:SetPoint("RIGHT", scroll.child, "RIGHT")
+            r.text:SetText(d.text)
+            r:Show()
+            if GameTooltip:IsOwned(r) then showTip(r) end
+        end
+        for i = #list + 1, #rows do rows[i]:Hide(); rows[i].data = nil end
+        scroll.child:SetHeight(#list * rowH + 10)
+    end
+end
+
 return Theme

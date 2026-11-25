@@ -17,17 +17,32 @@ local hubsByMap = {}
 
 local function pointKey(p) return string.format("%d:%.2f:%.2f", p.mapID or 0, p.x or 0, p.y or 0) end
 
+-- Nome de quem dá a quest: NPC (número) ou objeto ("o<id>": cartaz, livro). Spec 002, emenda de
+-- 24/11/2026: hub de objeto saía como "Hub 1413:1413:46.36:73.90".
+local function sourceName(src)
+    local D = ns.Data
+    if type(src) == "number" then return D.N.name(src) end
+    local oid = type(src) == "string" and tonumber(src:match("^o(%d+)$"))
+    if oid and D.O and D.O.name then
+        local ok, n = pcall(D.O.name, oid)
+        return ok and n or nil
+    end
+end
 local function hubName(hub)
     local count, best = {}, nil
     for _, p in ipairs(hub.points) do
         local src = p.source
-        if type(src) == "number" then
+        if src ~= nil then
             count[src] = (count[src] or 0) + (hub.questsAt[pointKey(p)] or 0)
-            if not best or count[src] > count[best] then best = src end
+            if not best or count[src] > count[best] or (count[src] == count[best] and type(src) == "number" and type(best) ~= "number") then
+                best = src
+            end
         end
     end
-    local name = best and ns.Data.N.name(best)
-    return name and ("Hub de " .. name) or ("Hub " .. hub.key)
+    local name = best and sourceName(best)
+    if name then return "Hub de " .. name end
+    local p = hub.points[1]
+    return string.format("Hub em %.0f, %.0f", p.x or 0, p.y or 0)
 end
 
 function Guide.Hubs(mapID)
@@ -167,6 +182,7 @@ local function questInfo(q, level, requires)
         xp = (D.QuestXP(q, level)), money = D.QuestMoney(q), delta = delta,
         starters = D.StarterPoints(q), finishers = D.FinisherPoints(q),
         objectives = objectives, elite = elite, dungeon = dungeon, requires = requires,
+        group = (ns.FP.db.groupChoice or {})[q], -- spec 054, R3
         qLevel = qLevel, -- spec 025
         ahead = chainAheadOf(q, level), -- spec 039, R3
     }
@@ -324,31 +340,229 @@ function Guide.Invalidate() cache.key, cache.rows = nil, nil end
 
 -- Spec 045, R1–R4: parada "abrir ponto de voo" onde o desvio entre as paradas for curto.
 -- Um ponto por vez, o de menor custo primeiro; cada um soma desvio / velocidade + conversa.
+local ZONE_MAX_DETOUR = 1500 -- R2c: desvio máximo para abrir o ponto antes de sair da zona (estimativa)
 local flightSkip = {} -- R6a: parada de voo dispensada nesta sessão ("voo:taxi<id>" = true)
-local function addFlightStops(c, red)
+-- Spec 052: o adaptador só junta os dados; a regra é Leveling.FlightStops (pura, com cenários).
+Guide.lastFlight = {} -- última entrada da regra por hub, para /fp cena (R9)
+local function addFlightStops(c, red, player)
     local db = ns.FP.db
-    local maxDetour, speed = db.flightMaxDetour or 400, db.runSpeed or 7
-    local overhead = db.flightOverhead or 10
+    local speed, overhead = db.runSpeed or 7, db.flightOverhead or 10
     local left = {}
     for _, p in ipairs(red) do
         if not flightSkip["voo:taxi" .. tostring(p.id)] then left[#left + 1] = p end
     end
-    while #left > 0 do
-        local bestI, bestOut, bestCost
-        for i, p in ipairs(left) do
-            local pt = { mapID = p.mapID, x = p.x, y = p.y, source = "taxi" .. tostring(p.id) }
-            local extra = { kind = "voo", key = "voo:" .. tostring(p.id), point = pt, points = { pt }, quests = {},
-                label = p.name }
-            local out, cost = ns.Leveling.InsertDetour(c.stops, extra, ns.Planner.Distance, maxDetour)
-            if out and (not bestCost or cost < bestCost) then bestI, bestOut, bestCost = i, out, cost end
-        end
-        if not bestI then break end
-        table.remove(left, bestI)
-        c.stops = bestOut
-        c.legs = (c.legs or 0) + bestCost
-        c.seconds = c.seconds + bestCost / speed + overhead
-        c.rate = c.seconds > 0 and c.value / c.seconds * 3600 or 0
+    if #left == 0 then return end
+    local F = ns.Gps.FLIGHT
+    local okHere, here = pcall(function() return (Guide.PlayerArea()) end)
+    local zones = {}
+    local ctx = {
+        dist = ns.Planner.Distance, here = okHere and here or nil,
+        zoneOf = function(pt)
+            if pt.zone ~= nil then return pt.zone end
+            if zones[pt.mapID] == nil then
+                local ok, z = pcall(Guide.MapZone, pt.mapID)
+                zones[pt.mapID] = ok and z or false
+            end
+            return zones[pt.mapID] or nil
+        end,
+        -- spec 044, R8: os conhecidos do continente do jogador (os vermelhos vêm de mapas dele)
+        known = ns.Planner.KnownTaxiPoints(ns.Planner.ContinentMap(player and player.mapID or left[1].mapID)),
+        maxDetour = db.flightMaxDetour or 400, zoneMax = ZONE_MAX_DETOUR,
+        fopts = { run = speed, fly = F.fly, factor = F.factor, overhead = F.overhead, margin = F.margin, walkShare = F.walkShare },
+    }
+    local start = player and player.x and player or nil
+    Guide.lastFlight[c.hubKey or "?"] = { start = start, stops = c.stops, red = left, ctx = ctx, hub = c.hubName or "?" }
+    local out, added, cost = ns.Leveling.FlightStops(start, c.stops, left, ctx)
+    for _, a in ipairs(added) do
+        ns.FP.Debug(string.format("voo no circuito: %s na parada %d, desvio %.0f jd (%s)", tostring(a.node.name), a.idx, a.cost, a.why))
     end
+    if #added == 0 then return end
+    c.stops = out
+    c.legs = (c.legs or 0) + cost -- spec 045, R3
+    c.seconds = c.seconds + cost / speed + overhead * #added
+    c.rate = c.seconds > 0 and c.value / c.seconds * 3600 or 0
+end
+
+-- R9: grava a última entrada da regra em jardas do mundo, para virar cenário de teste.
+function Guide.SaveScene()
+    -- parecer 050-052: a cena é a do hub seguido, não a do último hub do ranking
+    local followed = ns.FP.db.guide and ns.FP.db.guide.hub
+    local f = followed and Guide.lastFlight[followed]
+    if not f then ns.FP.Print("nenhum cálculo de voo do hub seguido: siga um hub com ponto de voo a abrir."); return end
+    local function w(p)
+        if not p then return nil end
+        local _, wx, wy = ns.Planner.WorldPos(p.mapID, p.x, p.y)
+        return { x = wx and math.floor(wx + 0.5), y = wy and math.floor(wy + 0.5), mapID = p.mapID, mx = p.x, my = p.y,
+            zone = f.ctx.zoneOf(p) }
+    end
+    local scene = { at = _G.date and _G.date("%Y-%m-%d %H:%M") or "", hub = f.hub, here = f.ctx.here, start = w(f.start),
+        stops = {}, red = {}, known = {} }
+    for _, s in ipairs(f.stops) do scene.stops[#scene.stops + 1] = w(s.point) end
+    for _, p in ipairs(f.red) do
+        local r = w(p); r.id, r.name, r.zone = p.id, p.name, p.zone
+        scene.red[#scene.red + 1] = r
+    end
+    for _, k in ipairs(f.ctx.known) do local r = w(k); r.name = k.name; scene.known[#scene.known + 1] = r end
+    local db = ns.FP.db
+    db.scenes = db.scenes or {}
+    table.insert(db.scenes, 1, scene)
+    while #db.scenes > 5 do table.remove(db.scenes) end
+    ns.FP.Print(string.format("cena gravada (%s, %d paradas, %d pontos a abrir). Dê /reload para salvar no disco.",
+        tostring(f.hub), #scene.stops, #scene.red))
+end
+
+------------------------------------------------------------------------------------------
+-- Quest de grupo (spec 054): pular ou fazer em grupo
+------------------------------------------------------------------------------------------
+local function groupKindOf(q)
+    local _, elite, dungeon = ns.Data.Objectives(q, UnitLevel("player"))
+    return ns.Leveling.GroupKind(elite, dungeon), dungeon
+end
+
+-- R2: pergunta ao aceitar, uma vez por quest. Parecer 053-056: o diálogo é definido uma vez, a quest
+-- vai em `data`, e as que chegam com ele aberto esperam na fila.
+local groupQueue, groupOpen = {}, false
+local askNext
+local function choose(q, v)
+    local db = ns.FP.db
+    db.groupChoice = db.groupChoice or {}
+    db.groupChoice[q] = v
+    ns.FP.Print(string.format("%s: %s.", ns.Data.Q.name(q) or tostring(q), v == "grupo" and "fazer em grupo" or "pulada (fica no log, fora da rota)"))
+    Guide.Invalidate(); ns.FP.Fire("CHANGED")
+end
+local function groupDialog()
+    local dialogs = _G.StaticPopupDialogs
+    if dialogs and not dialogs.FOREVERPLANNER_GRUPO then
+        dialogs.FOREVERPLANNER_GRUPO = {
+            text = "%s é de %s.\n\nPular: fica no log, fora da rota.\nFazer em grupo: entra na rota (elite) ou na lista da masmorra (/fp masmorras).",
+            button1 = "Fazer em grupo", button2 = "Pular",
+            OnAccept = function(_, q) choose(q, "grupo") end,
+            OnCancel = function(_, q, why) if why ~= "override" then choose(q, "pular") end end,
+            OnHide = function() groupOpen = false; C_Timer.After(0.3, function() askNext() end) end,
+            timeout = 0, whileDead = true, hideOnEscape = false,
+        }
+    end
+    return dialogs
+end
+askNext = function()
+    local db = ns.FP.db
+    db.groupChoice = db.groupChoice or {}
+    if groupOpen or not ns.Data.Q or not groupDialog() or not _G.StaticPopup_Show then return end
+    while groupQueue[1] do
+        local q = table.remove(groupQueue, 1)
+        local kind, dungeon = groupKindOf(q)
+        if kind and not db.groupChoice[q] and ns.Data.IsOnQuest(q) then
+            local what = kind == "elite" and "elite"
+                or ("masmorra" .. (type(dungeon) == "number" and (" (" .. tostring(Guide.AreaName(dungeon)) .. ")") or ""))
+            local dialog = _G.StaticPopup_Show("FOREVERPLANNER_GRUPO", ns.Data.Q.name(q) or tostring(q), what, q)
+            if dialog then groupOpen = true; return end
+            table.insert(groupQueue, 1, q) -- parecer: popups ocupados; pergunta depois
+            return
+        end
+    end
+end
+ns.FP.On("QUEST_ACCEPTED", function(q)
+    q = tonumber(q)
+    if not q or ns.FP.db.groupAsk == false or (ns.FP.db.groupChoice or {})[q] then return end -- spec 058
+    groupQueue[#groupQueue + 1] = q
+    ns.FP.AfterCombat("askGroup", function() C_Timer.After(1, function() askNext() end) end)
+end)
+
+-- Spec 058, R4: quests do plano: as mantidas nos circuitos dos hubs da zona e a seguida.
+-- Parecer 057-058: no diálogo do NPC, o último ranking (mesmo vencido); só recalcula sem nenhum e fora de combate.
+local function rowsForPlan()
+    local p = ns.Planner.PlayerPoint()
+    local key = p and p.mapID and (tostring(Guide.ZoneMap(p.mapID)) .. ":" .. UnitLevel("player"))
+    if cache.rows and cache.key == key then return cache.rows end -- parecer: só o da zona e do nível atuais
+    if InCombatLockdown() then return {} end
+    local ok, rows = pcall(Guide.Rank)
+    return ok and rows or {}
+end
+function Guide.PlanQuests()
+    local set = {}
+    local db = ns.FP.db
+    if ns.Data.Q ~= nil and ns.Data.ready then
+        for _, r in ipairs(rowsForPlan()) do
+            for _, k in ipairs(r.circuit.kept) do set[k.id] = true end
+        end
+        local g = db.guide and Guide.lastFollowed -- hub seguido em outro mapa
+        for _, k in ipairs(g and g.circuit and g.circuit.kept or {}) do set[k.id] = true end
+    end
+    if db.following then set[db.following] = true end
+    if Guide.tripQuest then set[Guide.tripQuest] = true end -- viagem real para entregar (spec 035)
+    return set
+end
+
+-- R4: quests do log de masmorra, por masmorra: { [chave] = { { name, dungeon, q, skipped } } }.
+function Guide.DungeonQuests()
+    local D, entries = ns.Data, {}
+    if not D.Q then return {} end
+    local choice = ns.FP.db.groupChoice or {}
+    for _, q in ipairs(D.LogQuests()) do
+        local kind, dungeon = groupKindOf(q)
+        if kind == "masmorra" and type(dungeon) == "number" then
+            entries[#entries + 1] = { name = D.Q.name(q) or tostring(q), dungeon = Guide.AreaName(dungeon) or "", q = q,
+                skipped = choice[q] == "pular" }
+        end
+    end
+    return ns.Dungeons.QuestsByDungeon(entries, ns.DungeonContent and ns.DungeonContent.aliases)
+end
+
+-- R5: /fp grupo quests [limpar]
+function Guide.PrintGroupQuests(arg)
+    local db = ns.FP.db
+    if arg == "limpar" then db.groupChoice = {}; Guide.Invalidate(); ns.FP.Print("escolhas de quest de grupo apagadas."); return end
+    local n = 0
+    for _, q in ipairs(ns.Data.LogQuests()) do
+        local kind = groupKindOf(q)
+        if kind then
+            n = n + 1
+            local c = (db.groupChoice or {})[q]
+            ns.FP.Print(string.format("  %s · %s · %s", ns.Data.Q.name(q) or tostring(q), kind,
+                c == "grupo" and "fazer em grupo" or (c == "pular" and "pulada" or "sem escolha (fora da rota)")))
+        end
+    end
+    if n == 0 then ns.FP.Print("nenhuma quest de elite ou masmorra no log.") end
+end
+
+-- Spec 053, R5: entrega pronta de outro hub com o NPC no caminho do circuito entra nele.
+local function addTurnInsOnTheWay(c, hub, level, readyLog)
+    local D, db = ns.Data, ns.FP.db
+    local inCircuit, extras = {}, {}
+    for _, k in ipairs(c.kept) do inCircuit[k.id] = true end
+    local function credit(q)
+        local xp = (D.QuestXP(q, level)) or 0
+        c.value, c.xp = c.value + xp, (c.xp or 0) + xp -- R5: valor e XP do circuito
+        c.names[q] = (D.Q.name(q) or ("Quest " .. q)) .. " (entrega no caminho)"
+    end
+    for _, q in ipairs(readyLog) do
+        if not inCircuit[q] then
+            local p = ns.Planner.Nearest(hub.points[1], D.FinisherPoints(q))
+            local same -- R5 (parecer): o circuito já para nesse NPC; a entrega sai lá, sem parada nova
+            for _, st in ipairs(c.stops) do
+                if p and st.point and st.point.source ~= nil and st.point.source == p.source then same = true; break end
+            end
+            if p and not same then
+                extras[#extras + 1] = { kind = "entregar", key = "entregar-caminho:" .. q, quests = { q }, point = p,
+                    points = { p }, quest = q }
+            end
+        end
+    end
+    local speed = db.runSpeed or 7
+    local added, cost = {}, 0
+    if #extras > 0 then
+        local out
+        out, added, cost = ns.Leveling.OnTheWay(c.stops, extras, db.flightMaxDetour or 400, ns.Planner.Distance, hub.points[1])
+        if #added > 0 then c.stops = out end
+    end
+    if #added == 0 then return end
+    c.legs = (c.legs or 0) + cost
+    c.seconds = c.seconds + cost / speed + 10 * #added
+    for _, a in ipairs(added) do
+        credit(a.stop.quest)
+        ns.FP.Debug(string.format("entrega no caminho: %s, desvio %.0f jd", tostring(c.names[a.stop.quest]), a.cost))
+    end
+    c.rate = c.seconds > 0 and c.value / c.seconds * 3600 or 0
 end
 
 -- Ranking de um mapa, sem cache (a aba Level, spec 035, pede vários mapas de uma vez).
@@ -366,12 +580,45 @@ function Guide.RankMap(mapID, player, level, yield)
         local h = anchor and Guide.NearestHub(hubs, anchor)
         if h then logByHub[h.key] = logByHub[h.key] or {}; table.insert(logByHub[h.key], q) end
     end
-    local red = {} -- spec 045, R2: pontos de voo a abrir do mapa
-    for _, p in ipairs(ns.Planner.FlightNodes(mapID)) do if p.known == false then red[#red + 1] = p end end
+    -- Spec 045, R2 (emenda de 21/11/2026): pontos de voo a abrir do mapa do hub e dos mapas onde
+    -- ficam as paradas (hub de Thunder Bluff com objetivos em Stonetalon: Sun Rock Retreat).
+    local redByMap = {}
+    local function redOf(map)
+        if redByMap[map] == nil then
+            local list = {}
+            for _, p in ipairs(ns.Planner.FlightNodesWithZone(map, Guide.MapZone)) do if p.known == false then list[#list + 1] = p end end
+            redByMap[map] = list
+        end
+        return redByMap[map]
+    end
+    local readyLog = {} -- spec 053, R5: prontas para entregar (uma lista por ranking)
+    for _, q in ipairs(D.LogQuests()) do
+        if ns.Planner.State(q) == "entregar" then readyLog[#readyLog + 1] = q end
+    end
     local rows = {}
     for _, hub in ipairs(hubs) do
         local c = buildCircuit(hub, level, player, logByHub, hubs)
-        if #red > 0 and #c.kept > 0 then addFlightStops(c, red) end
+        if #c.kept > 0 and ns.FP.db.turnInsOnTheWay ~= false then addTurnInsOnTheWay(c, hub, level, readyLog) end -- spec 053, R5; 058
+        if #c.kept > 0 then
+            local red, seenMap, seenNode = {}, {}, {}
+            local maps = { mapID }
+            -- R2c (emenda de 24/11/2026): também a zona onde o jogador está. Terminada a quest em
+            -- Stonetalon, sobravam só entregas em Thunder Bluff, e Sun Rock Retreat saía da conta.
+            local here = player and player.mapID and Guide.ZoneMap(player.mapID)
+            if here then maps[#maps + 1] = here end
+            for _, s in ipairs(c.stops) do if s.point and s.point.mapID then maps[#maps + 1] = s.point.mapID end end
+            for _, m in ipairs(maps) do
+                if not seenMap[m] then
+                    seenMap[m] = true
+                    for _, p in ipairs(redOf(m)) do
+                        if not seenNode[p.id] then seenNode[p.id] = true; red[#red + 1] = p end
+                    end
+                end
+            end
+            ns.FP.Debug(string.format("voo no circuito: hub %s, %d mapa(s), %d ponto(s) vermelho(s)", tostring(hub.key),
+                #maps, #red))
+            if #red > 0 and ns.FP.db.flightStops ~= false then c.hubName, c.hubKey = hub.name, hub.key; addFlightStops(c, red, player) end -- spec 058
+        end
         if #c.kept > 0 or #c.aside > 0 then
             local ready = 0
             for _, k in ipairs(c.kept) do if k.state == "entregar" then ready = ready + 1 end end
@@ -410,8 +657,12 @@ end
 ------------------------------------------------------------------------------------------
 -- Seguir circuito no GPS (R20–R23)
 ------------------------------------------------------------------------------------------
-local function stopLabel(stop, names)
-    if stop.kind == "objetivo" then return "Objetivo: " .. (stop.label or "?") end
+local function stopLabel(stop, names, point)
+    if stop.kind == "objetivo" then -- spec 013, R6: no objeto, diz o que pegar
+        local p = point or stop.point
+        local obj = p and type(p.source) == "string" and p.source:match("^o%d+$") and ns.Data.PointName(p)
+        return ns.Util.ObjectiveTitle(stop.label, obj or nil)
+    end
     if stop.kind == "voo" then return "Abrir ponto de voo: " .. (stop.label or "?") end -- spec 045, R5
     local qs = {}
     for _, q in ipairs(stop.quests) do qs[#qs + 1] = names[q] or tostring(q) end
@@ -435,6 +686,7 @@ function Guide.Step()
         return
     end
     local row = Guide.Find(g.hub)
+    Guide.lastFollowed = row -- spec 058, R4: o plano inclui o hub seguido
     local stops = row and row.circuit.stops or {}
     if #stops == 0 then
         ns.FP.Debug(string.format("step: circuito concluído (hub=%s row=%s)", g.hub, tostring(row ~= nil)))
@@ -472,7 +724,7 @@ function Guide.Step()
     Guide.current = { id = stopID(stop), point = point, visited = visited }
     ns.FP.Debug(string.format("step hub=%s parada=%s ponto=%.1f,%.1f paradas=%d mantida=%s",
         g.hub, Guide.current.id, point.x or -1, point.y or -1, #stops, tostring(cur ~= nil and cur.id == Guide.current.id)))
-    ns.Gps.SetTarget(point.mapID, point.x, point.y, stopLabel(stop, row.circuit.names))
+    ns.Gps.SetTarget(point.mapID, point.x, point.y, stopLabel(stop, row.circuit.names, point))
     -- R18: o plano sob a seta.
     local idx = 1
     for i, s in ipairs(stops) do if s == stop then idx = i end end
@@ -645,9 +897,10 @@ end
 local function followBagEntry(b)
     local s = b.step or b
     local via = b.step and string.format(" · começa por %s (%s)", s.name, s.zone) or ""
-    ns.FP.Print(string.format("seguindo bolsa: %s (%s, %s) — %s%s", b.name, b.itemName or "bolsa", b.zone, s.status, via))
     ns.FP.Debug("bolsa: seguir " .. s.q .. (b.step and (" (cadeia de " .. b.q .. ")") or ""))
-    ns.Planner.Follow(s.q)
+    if ns.Planner.Follow(s.q) then
+        ns.FP.Print(string.format("seguindo bolsa: %s (%s, %s) — %s%s", b.name, b.itemName or "bolsa", b.zone, s.status, via))
+    end
 end
 
 function Guide.FollowBag()

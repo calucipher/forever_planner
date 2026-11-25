@@ -308,9 +308,10 @@ local function entityPoints(kind, id)
     return pts
 end
 
+-- Área da masmorra onde há spawn (spec 006, R20: o chat diz qual é), ou false.
 local function inDungeon(spawns)
     for areaId in pairs(spawns or {}) do
-        if Data.dungeons and Data.dungeons[areaId] then return true end
+        if Data.dungeons and Data.dungeons[areaId] then return areaId end
     end
     return false
 end
@@ -367,6 +368,31 @@ function Data.TransportCandidates(faction)
     end
     return out
 end
+
+-- Spec 047, R5 e 048, R4: NPCs de uma função ("Innkeeper", "Auctioneer") amigos da facção, com
+-- posição: { {mapID, x, y, name, source} }. Uma varredura por função e facção na sessão.
+local bySubName = {}
+function Data.NpcsBySubName(subName, faction)
+    local key = subName .. ":" .. tostring(faction)
+    if bySubName[key] then return bySubName[key] end
+    local out, tag = {}, faction == "Horde" and "H" or "A"
+    for _, id in ipairs(Data.N and Data.N.GetAllIds and Data.N.GetAllIds() or {}) do
+        if Data.N.subName(id) == subName then
+            local f = Data.N.friendlyToFaction(id)
+            if f ~= nil and tostring(f):find(tag) then
+                for _, p in ipairs(entityPoints("npc", id)) do
+                    out[#out + 1] = { mapID = p.mapID, x = p.x, y = p.y, name = Data.N.name(id), source = "npc" .. id }
+                end
+            end
+        end
+    end
+    bySubName[key] = out
+    return out
+end
+function Data.Innkeepers(faction) return Data.NpcsBySubName("Innkeeper", faction) end
+
+-- Spec 048, R4: pontos de um NPC (vendedor), na ordem da QuestieDB.
+function Data.NpcPoints(id) return entityPoints("npc", id) end
 
 -- Spec 019, R2: só entra rota que muda de continente. Cada ponto leva name, kind e dest.
 -- Spec 020, R2: e arrival, a primeira posição do transporte do outro lado (pair da rota).
@@ -477,9 +503,16 @@ local function dropObjective(item, qLevel, zone)
         levels[#levels + 1] = { lo, hi }
         est = est or e2
         if not isEliteNpc(npc) then allElite = false end
-        if inDungeon(Data.N.spawns(npc)) then dungeon = true end
+        dungeon = dungeon or inDungeon(Data.N.spawns(npc))
     end
-    for _, obj in ipairs(objs) do addAll(pts, entityPoints("object", obj)) end
+    local objSpawns = {}
+    for _, obj in ipairs(objs) do
+        addAll(pts, entityPoints("object", obj))
+        objSpawns[#objSpawns + 1] = Data.O.spawns(obj)
+    end
+    -- spec 006, R20: item só de objeto, e objeto só em masmorra (Blueleaf Tuber, Razorfen Kraul), é masmorra.
+    -- Veio, erva e baú também nascem em masmorra: com algum spawn no mundo, não conta (parecer 013-006).
+    if #npcs == 0 and #objs > 0 then dungeon = dungeon or Util.DungeonOnly(objSpawns, Data.dungeons) end
     local key
     if #npcs == 1 and #objs == 0 then key = "npc:" .. npcs[1] -- junta com "matar o mesmo mob" (R11)
     elseif #npcs > 0 then local s = {}; for i, n in ipairs(npcs) do s[i] = n end; table.sort(s); key = "npcs:" .. table.concat(s, ",")
@@ -507,21 +540,21 @@ local function staticObjectives(q)
     local o = Q.objectives(q) or {}
     local qLevel = Q.questLevel(q) or 1
     local list, elite, dungeon = {}, false, false
-    if (Q.zoneOrSort(q) or 0) > 0 and Data.dungeons[Q.zoneOrSort(q)] then dungeon = true end
+    if (Q.zoneOrSort(q) or 0) > 0 and Data.dungeons[Q.zoneOrSort(q)] then dungeon = Q.zoneOrSort(q) end
     local zone = (Q.zoneOrSort(q) or 0) > 0 and Data.ZoneOfArea(Q.zoneOrSort(q)) or nil -- spec 030
 
     for _, e in ipairs(o[1] or {}) do
         local id = e[1]
         local lo, hi, est = npcLevels(id, qLevel)
         if isEliteNpc(id) then elite = true end
-        if inDungeon(Data.N.spawns(id)) then dungeon = true end
+        dungeon = dungeon or inDungeon(Data.N.spawns(id))
         list[#list + 1] = { key = "npc:" .. id, kind = "kill", names = { Data.N.name(id) },
             label = Data.N.name(id), points = entityPoints("npc", id), levels = { { lo, hi } }, estimated = est,
             avgLevel = avgLevelOf({ id }, qLevel, zone) }
     end
     for _, e in ipairs(o[2] or {}) do
         local id = e[1]
-        if inDungeon(Data.O.spawns(id)) then dungeon = true end
+        dungeon = dungeon or inDungeon(Data.O.spawns(id))
         list[#list + 1] = { key = "obj:" .. id, kind = "object", names = { Data.O.name(id) },
             label = Data.O.name(id), points = entityPoints("object", id), levels = {} }
     end

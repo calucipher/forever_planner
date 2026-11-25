@@ -176,7 +176,7 @@ function Milestones.MissingSpells(spells, level, isKnown)
     end
     local out = {}
     for name, s in pairs(best) do
-        out[#out + 1] = { lvl = s.lvl, id = s.id, name = s.name, rank = lowest[name] < s.lvl }
+        out[#out + 1] = { lvl = s.lvl, id = s.id, name = s.name, rank = lowest[name] < s.lvl, new = s.new } -- spec 051, R7
     end
     table.sort(out, function(a, b) if a.lvl ~= b.lvl then return a.lvl > b.lvl end return a.name < b.name end)
     return out
@@ -187,11 +187,47 @@ function Milestones.FormatSpells(list, max)
     local parts = {}
     for i = 1, math.min(#list, max) do
         local s = list[i]
-        parts[#parts + 1] = string.format("%s (%d%s)", s.name, s.lvl, s.rank and ", rank novo" or "")
+        local tag = s.new and ", novo do Forever" or (s.rank and ", rank novo" or "") -- spec 051, R3
+        parts[#parts + 1] = string.format("%s (%d%s)", s.name, s.lvl, tag)
     end
     local text = table.concat(parts, ", ")
     if #list > max then text = text .. " e mais " .. (#list - max) end
     return text
+end
+
+-- Spec 055, R1: custo e quantidade dos serviços disponíveis do treinador.
+function Milestones.TrainTotal(services)
+    local total, n = 0, 0
+    for _, s in ipairs(services or {}) do
+        if s.available then total, n = total + (s.cost or 0), n + 1 end
+    end
+    return total, n
+end
+
+-- Spec 055, R4: posições da barra com rank velho (o livro tem um de mesmo nome e nível maior).
+function Milestones.OldRanks(slots, spells, isKnown)
+    local byId, best = {}, {}
+    for _, s in ipairs(spells or {}) do
+        byId[s.id] = s
+        if isKnown(s.id) and (not best[s.name] or s.lvl > best[s.name].lvl) then best[s.name] = s end
+    end
+    local out = {}
+    for _, sl in ipairs(slots or {}) do
+        local s = byId[sl.id]
+        local top = s and best[s.name]
+        if top and top.lvl > s.lvl then
+            out[#out + 1] = { slot = sl.slot, id = sl.id, name = s.name, lvl = s.lvl, newId = top.id, newLvl = top.lvl }
+        end
+    end
+    return out
+end
+
+-- Spec 051, R4: subtítulo do treinador da classe na QuestieDB.
+local TRAINER = { WARRIOR = "Warrior", PALADIN = "Paladin", HUNTER = "Hunter", ROGUE = "Rogue", PRIEST = "Priest",
+    SHAMAN = "Shaman", MAGE = "Mage", WARLOCK = "Warlock", DRUID = "Druid" }
+function Milestones.TrainerTitle(classToken)
+    local c = TRAINER[classToken]
+    return c and (c .. " Trainer") or nil
 end
 
 -- R8: nível par a partir do 4 (validado no cliente, spec 017).

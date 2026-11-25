@@ -185,8 +185,139 @@ function ClassGuide.WarnSpells(level, onlyLevel)
         missing = fresh
     end
     if #missing == 0 then return true end
-    ns.FP.Print("|cFFFFD100feitiços novos para aprender|r (trainer ou quest de classe): " .. M.FormatSpells(missing, 8) .. ".")
+    ns.FP.Print("|cFFFFD100feitiços novos para aprender|r (trainer ou quest de classe): " .. M.FormatSpells(missing, 8)
+        .. ". /fp treinar leva ao treinador mais perto.") -- spec 051, R6
     return true
+end
+
+------------------------------------------------------------------------------------------
+-- Spec 055: custo do treino, "Treinar tudo" e rank velho na barra
+------------------------------------------------------------------------------------------
+local function trainerServices()
+    local out = {}
+    local num, info, cost = _G.GetNumTrainerServices, _G.GetTrainerServiceInfo, _G.GetTrainerServiceCost
+    if not (num and info and cost) then return out end
+    for i = 1, (num() or 0) do
+        local name, _, category = info(i)
+        out[#out + 1] = { index = i, name = name, available = category == "available", cost = (cost(i)) or 0 }
+    end
+    return out
+end
+local function money() return _G.GetMoney and _G.GetMoney() or 0 end
+
+-- R2: total ao abrir a janela.
+ns.FP.On("TRAINER_SHOW", function()
+    local total, n = M.TrainTotal(trainerServices())
+    if n > 0 then
+        ns.FP.Print(string.format("%d feitiço(s) para treinar aqui, total %s (você tem %s). /fp treinar tudo compra.",
+            n, ns.Util.FormatMoney(total), ns.Util.FormatMoney(money())))
+    end
+    local frame = _G.ClassTrainerFrame
+    if frame and not ClassGuide.trainAllButton and ns.Theme and ns.Theme.Button then
+        local b = ns.Theme.Button(frame, "Treinar tudo", 90, 22, function() ClassGuide.TrainAll() end)
+        b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -40, -30)
+        ClassGuide.trainAllButton = b
+    end
+end)
+
+-- R3: compra os disponíveis em ordem enquanto o dinheiro der.
+function ClassGuide.TrainAll()
+    local services = trainerServices()
+    if #services == 0 or not _G.BuyTrainerService then ns.FP.Print("abra a janela do treinador primeiro."); return end
+    -- R3 (parecer 053-056): escolhe em ordem, enquanto o dinheiro der; compra de trás para frente,
+    -- porque comprar tira o serviço da lista e muda o índice dos seguintes.
+    local pick, spent, left = {}, 0, money()
+    for _, s in ipairs(services) do
+        if s.available then
+            if s.cost > left then break end
+            pick[#pick + 1] = s
+            spent, left = spent + s.cost, left - s.cost
+        end
+    end
+    for i = #pick, 1, -1 do _G.BuyTrainerService(pick[i].index) end
+    local bought = #pick
+    ns.FP.Print(bought > 0 and string.format("treinou %d feitiço(s), gastou %s.", bought, ns.Util.FormatMoney(spent))
+        or "nada para treinar com o dinheiro que você tem.")
+end
+
+-- R4: posições da barra com rank velho.
+local function oldRanks()
+    local _, class = UnitClass("player")
+    local list = ns.Spells and ns.Spells[class]
+    local info = _G.GetActionInfo
+    if not (list and info) then return {} end
+    local slots = {}
+    for slot = 1, 180 do
+        local kind, id = info(slot)
+        if kind == "spell" and id then slots[#slots + 1] = { slot = slot, id = id } end
+    end
+    return M.OldRanks(slots, list, isKnown)
+end
+
+-- R5: /fp ranks [trocar]
+function ClassGuide.Ranks(arg)
+    local list = oldRanks()
+    if #list == 0 then ns.FP.Print("nenhum rank velho na barra."); return end
+    if arg ~= "trocar" then
+        for _, r in ipairs(list) do
+            ns.FP.Print(string.format("  posição %d: %s do nível %d (o livro tem o do nível %d)", r.slot, r.name, r.lvl, r.newLvl))
+        end
+        ns.FP.Print("/fp ranks trocar põe o rank novo no lugar.")
+        return
+    end
+    if InCombatLockdown() then ns.FP.Print("em combate não dá para mexer na barra."); return end
+    local pickup = (_G.C_Spell and _G.C_Spell.PickupSpell) or _G.PickupSpell
+    if not (pickup and _G.PlaceAction and _G.ClearCursor) then ns.FP.Print("este cliente não deixa trocar a barra."); return end
+    local done = 0
+    for _, r in ipairs(list) do
+        _G.ClearCursor(); pickup(r.newId); _G.PlaceAction(r.slot); _G.ClearCursor()
+        local _, id = _G.GetActionInfo(r.slot)
+        if id == r.newId then done = done + 1 end -- parecer: conta só o que a barra confirmou
+    end
+    ns.FP.Print(string.format("%d de %d posição(ões) com o rank novo.", done, #list))
+end
+
+local ranksWarned, ranksPending = {}, false
+ns.FP.On("LEARNED", function()
+    if ranksPending then return end -- parecer: "Treinar tudo" dispara um LEARNED por feitiço; um aviso só
+    ranksPending = true
+    ns.FP.AfterCombat("oldRanks", function()
+        C_Timer.After(2, function()
+            ranksPending = false
+            local fresh = 0
+            for _, r in ipairs(oldRanks()) do
+                if not ranksWarned[r.slot .. ":" .. r.newId] then ranksWarned[r.slot .. ":" .. r.newId] = true; fresh = fresh + 1 end
+            end
+            if fresh > 0 then ns.FP.Print(string.format("|cFFFFD100%d botão(ões) da barra com rank velho.|r /fp ranks mostra; /fp ranks trocar troca.", fresh)) end
+        end)
+    end)
+end)
+
+-- Spec 051, R5: seta no treinador da classe mais perto (o do mesmo continente primeiro).
+function ClassGuide.FollowClassTrainer()
+    local level = UnitLevel("player")
+    local missing = ClassGuide.MissingSpells(level)
+    if missing and #missing == 0 then
+        ns.FP.Print(string.format("nada novo para treinar no nível %d.", level))
+        return
+    end
+    local _, class = UnitClass("player")
+    local title = M.TrainerTitle(class)
+    local faction = _G.UnitFactionGroup and _G.UnitFactionGroup("player")
+    local all = title and ns.Data.NpcsBySubName(title, faction) or {}
+    local player = ns.Planner.PlayerPoint()
+    local near = {}
+    for _, p in ipairs(all) do
+        if ns.Planner.SameContinent(player, p) == true then near[#near + 1] = p end
+    end
+    local best = ns.Planner.Nearest(player, #near > 0 and near or all)
+    if not best then
+        ns.FP.Print("não achei o treinador da sua classe na QuestieDB (" .. tostring(title) .. ").")
+        return
+    end
+    if missing then ns.FP.Print("|cFFFFD100para treinar:|r " .. M.FormatSpells(missing, 8) .. ".") end
+    if #near == 0 then ns.FP.Print("o treinador mais perto fica em outro continente.") end
+    ns.Gps.SetTarget(best.mapID, best.x, best.y, "Treinar: " .. tostring(best.name))
 end
 
 -- Spec 017, R3: marco cumprido (o jogador já conhece o feitiço)?

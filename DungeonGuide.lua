@@ -258,12 +258,20 @@ function DG.PrintList(zoneOnly)
         return
     end
     local L = UnitLevel("player")
+    local okQ, quests = pcall(ns.Guide.DungeonQuests)
+    if not okQ then quests = {} end
     for _, d in ipairs(list) do
         local e = DG.Nearest(d)
         FP().Print(string.format("%s  %s  · %s%s", d.name, DG.Range(d, L), DG.Where(e), e and e.est and " (estimativa)" or ""))
         if d.stone then FP().Print("    meeting stone: " .. DG.Where(d.stone)) end
         local at = DG.AttuneText(d)
         if at then FP().Print("    " .. at) end
+        local mine = quests[d.key] -- spec 054, R4
+        if mine then
+            local names = {}
+            for _, mq in ipairs(mine) do names[#names + 1] = mq.name .. (mq.skipped and " (pulada)" or "") end
+            FP().Print("    |cFFFFD100suas quests:|r " .. table.concat(names, ", "))
+        end
     end
 end
 

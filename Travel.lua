@@ -78,13 +78,19 @@ function Travel.Plan(from, to, ctx)
     if not (from and to and from.cont and to.cont) then return nil end
     local best = plain(from, to, ctx)
     local h = ctx.hearth
-    if h and h.ready and h.to then
+    -- spec 056, R2: em recarga, esperar pode compensar, até hearthMaxWait (parecer: tempo parado vale menos)
+    local wait = h and not h.ready and h.left and h.left <= (ctx.hearthMaxWait or 600) and h.left
+    if h and (h.ready or wait) and h.to then
         local after = plain(h.to, to, ctx)
         if after then
             local stone = { seconds = ctx.hearthSeconds, steps = { { kind = "lar", seconds = ctx.hearthSeconds,
                 label = "pedra de lar" .. (h.name and (" (" .. h.name .. ")") or ""), point = from,
                 measured = isMeasured(ctx, "hearthSeconds") } } }
             local total = concat(stone, after)
+            if wait then
+                total = concat({ seconds = wait, steps = { { kind = "esperar", seconds = wait, point = from,
+                    label = string.format("espere a pedra de lar (%d min)", math.max(1, math.floor(wait / 60 + 0.5))) } } }, total)
+            end
             -- a recarga é de cerca de 1 hora: só vale se poupar pelo menos hearthMinSave
             if not best or total.seconds + (ctx.hearthMinSave or 0) <= best.seconds then best = total end
         end
@@ -101,7 +107,7 @@ function Travel.Describe(plan)
     for _, s in ipairs(plan.steps) do
         if s.kind == "voar" then parts[#parts + 1] = "voo " .. (s.label or "?")
         elseif s.kind == "transporte" then parts[#parts + 1] = s.label or "transporte"
-        elseif s.kind == "lar" then parts[#parts + 1] = s.label or "pedra de lar" end
+        elseif s.kind == "lar" or s.kind == "esperar" then parts[#parts + 1] = s.label or "pedra de lar" end -- spec 056, R3
     end
     if #parts == 0 then return string.format("a pé ~%d min", minutes(plan.seconds)) end
     parts[#parts + 1] = string.format("~%d min", minutes(plan.seconds))
