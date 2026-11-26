@@ -259,7 +259,11 @@ end
 local function buildCircuit(hub, level, player, logByHub, hubs)
     local D = ns.Data
     local list, seen = {}, {}
-    local function add(info) if info and not seen[info.id] then seen[info.id] = true; list[#list + 1] = info end end
+    local now = _G.GetTime and _G.GetTime() or 0
+    local function add(info)
+        if info and info.state == "pegar" and ns.Leveling.SkipActive(Guide.pickSkip, info.id, now) then return end -- spec 059
+        if info and not seen[info.id] then seen[info.id] = true; list[#list + 1] = info end
+    end
     -- R1 (spec 006): quest do log só entra pelo logByHub (hub da entrega). Pelo hub de quem deu a
     -- quest, a entrega em outro mapa virava parada do circuito (ex.: "Sample for Helbrim", 11/11/2026).
     for _, q in ipairs(hub.questList) do
@@ -315,7 +319,8 @@ local function buildCircuit(hub, level, player, logByHub, hubs)
     local names, keptSet, byID = {}, {}, {}
     for _, info in ipairs(list) do byID[info.id] = info end
     for _, info in ipairs(list) do
-        names[info.id] = info.name .. (info.requires and " (cont.)" or "") .. (info.satellite and " (no caminho)" or "")
+        local escort = info.state == "pegar" and Util.IsEscort(D.Q.objectivesText(info.id)) -- spec 059, R2
+        names[info.id] = info.name .. (escort and " (escolta)" or "") .. (info.requires and " (cont.)" or "") .. (info.satellite and " (no caminho)" or "")
             .. goalText(info.goal) -- spec 046, R10
             .. (info.bag and (info.bonusXP and " (bônus de XP)" or " (bolsa)") or "") .. (info.weapon and " (arma)" or "") .. (info.trainSkill and info.trainOn and (" (treine " .. info.trainSkill .. ")") or "")
     end
@@ -542,7 +547,7 @@ local function addTurnInsOnTheWay(c, hub, level, readyLog)
             for _, st in ipairs(c.stops) do
                 if p and st.point and st.point.source ~= nil and st.point.source == p.source then same = true; break end
             end
-            if p and not same then
+            if p and not same and ns.Planner.SameContinent(hub.points[1], p) == true then -- spec 053, R4b
                 extras[#extras + 1] = { kind = "entregar", key = "entregar-caminho:" .. q, quests = { q }, point = p,
                     points = { p }, quest = q }
             end
@@ -687,8 +692,19 @@ function Guide.Step()
     end
     local row = Guide.Find(g.hub)
     Guide.lastFollowed = row -- spec 058, R4: o plano inclui o hub seguido
-    local stops = row and row.circuit.stops or {}
+    -- spec 059, R7: sem as paradas que o jogador pulou
+    local stops = ns.Leveling.FilterSkipped(row and row.circuit.stops or {}, Guide.stopSkip, _G.GetTime(), stopID)
     if #stops == 0 then
+        local waiting, mins = Guide.HubWaiting(g.hub, row and row.circuit.stops) -- spec 059, R5 e R7
+        if #waiting > 0 then
+            Guide.current = nil
+            ns.Gps.Clear(true)
+            if Guide.waitNote ~= g.hub .. ":" .. mins then
+                Guide.waitNote = g.hub .. ":" .. mins
+                ns.FP.Print(string.format("esperando %s: volta em %d min.", table.concat(waiting, ", "), mins))
+            end
+            return
+        end
         ns.FP.Debug(string.format("step: circuito concluído (hub=%s row=%s)", g.hub, tostring(row ~= nil)))
         ns.FP.db.guide, Guide.current = nil, nil
         ns.Gps.Clear()
@@ -995,7 +1011,8 @@ local function playerZone() return Guide.ZoneMap(C_Map.GetBestMapForUnit and C_M
 local function hubMapOf(key) return key and tonumber(key:match("^(%d+):")) end
 local function hasCircuit(key)
     local row = Guide.Find(key)
-    return row ~= nil and #row.circuit.stops > 0
+    if row ~= nil and #row.circuit.stops > 0 then return true end
+    return #(Guide.HubWaiting(key, row and row.circuit.stops)) > 0 -- spec 059, R5 e R7: hub esperando continua salvo
 end
 ns.FP.On("ZONE", function()
     local to = playerZone()
@@ -1021,6 +1038,8 @@ ns.FP.On("READY", function() lastZone = lastZone or playerZone() end)
 ns.FP.On("GPS_ARRIVED", function()
     local cur = Guide.current
     if cur and cur.id:find("^objetivo:") then cur.visited[cur.point] = true end -- R13
+    -- Spec 059, R3: chegou para pegar e, em 30 s, nem diálogo nem quest: quem dá não está aqui.
+    if cur and cur.id:find("^pegar:") then Guide.WatchAbsent(cur.id) end
     -- Spec 045, R6a: chegou ao ponto de voo e não abriu o mestre em 20 s: a parada sai na sessão.
     if cur and cur.id:find("^voo:") then
         local id = cur.id
@@ -1031,6 +1050,95 @@ ns.FP.On("GPS_ARRIVED", function()
     end
     C_Timer.After(1.5, step)
 end)
+-- Spec 059, R3: vigia da parada "pegar" desde a primeira chegada; a decisão é Leveling.AbsentDecision.
+local ABSENT_SKIP, ABSENT_WAIT, ABSENT_NEAR = 600, 30, 40
+Guide.pickSkip, Guide.pickSkipHub = {}, {}
+local watch -- { id, npc, dialog }
+ns.FP.On("QUEST_DIALOG", function()
+    if not watch then return end
+    local guid = _G.UnitGUID and _G.UnitGUID("npc")
+    local _, id = Util.EntityFromGUID(guid)
+    if not id or not watch.npc or tostring(id) == tostring(watch.npc) then watch.dialog = true end
+end)
+local function absentCheck(id)
+    if not (watch and watch.id == id) then return end
+    local cur = Guide.current
+    local same = cur and cur.id == id
+    local p = ns.Planner.PlayerPoint()
+    local d = same and p and ns.Planner.Distance(p, cur.point)
+    local what = ns.Leveling.AbsentDecision({ same = same, dialog = watch.dialog, near = d ~= nil and d <= ABSENT_NEAR,
+        combat = _G.UnitAffectingCombat and _G.UnitAffectingCombat("player") })
+    if what == "esperar" then C_Timer.After(10, function() absentCheck(id) end); return end
+    watch = nil
+    if what ~= "dispensar" then return end
+    local g = ns.FP.db.guide
+    local row = g and Guide.Find(g.hub)
+    local D, stop = ns.Data, nil
+    for _, s in ipairs(row and row.circuit.stops or {}) do if stopID(s) == id then stop = s; break end end
+    if not stop then return end
+    local names, escort, untilT = {}, false, _G.GetTime() + ABSENT_SKIP
+    for _, q in ipairs(stop.quests or {}) do
+        if not D.IsOnQuest(q) then
+            Guide.pickSkip[q], Guide.pickSkipHub[q] = untilT, g.hub
+            names[#names + 1] = D.Q.name(q) or tostring(q)
+            escort = escort or Util.IsEscort(D.Q.objectivesText(q))
+        end
+    end
+    if #names == 0 then return end
+    ns.FP.Print(string.format("%s não está aqui: %s sai(em) da rota por 10 min%s.", tostring(D.PointName(stop.point) or "quem dá a quest"),
+        table.concat(names, ", "), escort and " (escolta: outro jogador pode estar com ele; ele volta em alguns minutos)" or ""))
+    invalidateAndStep()
+    C_Timer.After(ABSENT_SKIP + 1, invalidateAndStep)
+end
+function Guide.WatchAbsent(id)
+    if watch and watch.id == id then return end -- R3: a primeira chegada vale; não reinicia
+    local npc = id:match("^pegar:(%d+)$")
+    watch = { id = id, npc = npc and tonumber(npc) or nil, dialog = false }
+    C_Timer.After(ABSENT_WAIT, function() absentCheck(id) end)
+end
+
+-- R5: quests do hub seguido dispensadas agora (nomes e minutos que faltam).
+function Guide.HubWaiting(hubKey, stops)
+    local now, names, left = _G.GetTime(), {}, 0
+    local present = {} -- R7: só conta a pulada que ainda está no circuito (parecer 006-059)
+    for _, s in ipairs(stops or {}) do present[stopID(s)] = true end
+    for q, hub in pairs(Guide.pickSkipHub) do
+        if hub == hubKey and ns.Leveling.SkipActive(Guide.pickSkip, q, now) then
+            names[#names + 1] = ns.Data.Q.name(q) or tostring(q)
+            left = math.max(left, Guide.pickSkip[q] - now)
+        end
+    end
+    for id, s in pairs(Guide.stopSkipInfo) do -- spec 059, R7: as puladas pelo jogador
+        if s.hub == hubKey and present[id] and ns.Leveling.SkipActive(Guide.stopSkip, id, now) then
+            names[#names + 1] = s.label
+            left = math.max(left, Guide.stopSkip[id] - now)
+        end
+    end
+    return names, math.ceil(left / 60)
+end
+
+-- Spec 059, R7: "Pular esta parada" (menu + e /fp pular): a parada atual sai por 10 minutos.
+Guide.stopSkip, Guide.stopSkipInfo = {}, {}
+function Guide.SkipCurrent()
+    local g, cur = ns.FP.db.guide, Guide.current
+    if not (g and cur) then ns.FP.Print("nenhuma parada de hub sendo seguida."); return end
+    local row = Guide.Find(g.hub)
+    local label = cur.id
+    for _, s in ipairs(row and row.circuit.stops or {}) do
+        if stopID(s) == cur.id then label = stopLabel(s, row.circuit.names); break end
+    end
+    if cur.id:find("^voo:") then -- R7: voo usa a dispensa de voo (spec 045, R6a), que vale na sessão
+        flightSkip[cur.id] = true
+        ns.FP.Print(string.format("parada pulada nesta sessão: %s", label))
+    else
+        Guide.stopSkip[cur.id] = _G.GetTime() + ABSENT_SKIP
+        Guide.stopSkipInfo[cur.id] = { hub = g.hub, label = label }
+        ns.FP.Print(string.format("parada pulada por 10 min: %s", label))
+    end
+    Guide.current = nil
+    invalidateAndStep()
+    C_Timer.After(ABSENT_SKIP + 1, invalidateAndStep)
+end
 ns.FP.On("READY", function() C_Timer.After(1, invalidateAndStep) end) -- R4: retoma depois do /reload
 ns.FP.On("DATA_READY", invalidateAndStep) -- R4: o índice termina segundos depois do READY
 ns.FP.On("TAXI_KNOWN", invalidateAndStep) -- spec 045, R6: ponto aberto sai do circuito
@@ -1045,7 +1153,8 @@ local function zoneParams()
         farDelivery = db.farDelivery, unknownKills = db.unknownKills, travelSame = db.travelSame,
         travelOther = db.travelOther, stay = db.zoneStay, minVisit = db.zoneMinVisit,
         lookahead = db.zoneLookahead, threshold = db.threshold or 0.5,
-        mobTolerance = (ns.FP.MobTolerance()) } -- spec 031, R7
+        mobTolerance = (ns.FP.MobTolerance()), -- spec 031, R7 (e o modo fácil, spec 063, R2)
+        easy = L.EasyActive(db.easyMode, UnitLevel("player")) } -- spec 063, R3 e R2a: grind só de L-4 a L-2
 end
 Guide.ZoneParams = zoneParams -- tools/pesquisa_zonas.lua usa os mesmos parâmetros (R23)
 

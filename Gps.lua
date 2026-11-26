@@ -65,15 +65,35 @@ function Gps.PlanFlight(player, target, nodes, opts)
     return { from = a, to = b, walk = walk, total = total }
 end
 
--- Spec 034, R8: ir pela estrada compensa? Caminho de Roads.Path ou nil.
-function Gps.PlanRoad(player, target, graph, opts)
+-- Spec 034, R8: ir pela estrada compensa? Caminho de Roads.Path ou nil. canJump: R7a.
+function Gps.PlanRoad(player, target, graph, opts, canJump)
     if not (player and target and graph) then return nil end
     local straight = span(player, target)
     if straight <= opts.minDist then return nil end
-    local path = ns.Roads.Path(graph, player, target)
-    if not path or path.accessFrom > opts.maxAccess or path.accessTo > opts.maxAccess then return nil end
+    local path = ns.Roads.Path(graph, player, target, { canJump = canJump })
+    if not path or path.accessFrom > opts.maxAccess
+        or path.accessTo > (opts.maxAccessTo or opts.maxAccess) then return nil end -- R8a
     if path.accessFrom + path.road + path.accessTo > opts.factor * straight then return nil end
     return path
+end
+
+-- Spec 034, R8b: o fim da estrada até o destino precisa ir pela malha? Ponto de saída ou nil.
+-- Só quando o acesso passa de minYd e clear(ax, ay, bx, by) diz que a reta não passa; sem clear, nil.
+function Gps.TailNeeded(path, dest, clear, minYd)
+    local last = path and path.points and path.points[#path.points]
+    if not (last and dest and clear) or (path.accessTo or 0) <= minYd then return nil end
+    if clear(last.x, last.y, dest.x, dest.y) then return nil end
+    return last
+end
+
+-- R8b: a rota com os pontos da malha antes do destino (o último ponto da rota). Rota nova; o
+-- começo é o mesmo, então o avanço guardado da mira continua valendo.
+function Gps.WithTail(route, pts)
+    local out = {}
+    for i = 1, #route - 1 do out[i] = route[i] end
+    for _, pt in ipairs(pts) do out[#out + 1] = pt end
+    out[#out + 1] = route[#route]
+    return out
 end
 
 ------------------------------------------------------------------------------------------
@@ -166,12 +186,24 @@ nodeZone = function(n)
     return nodeZones[key] or nil
 end
 
+-- Spec 064, R3: custo de atravessar a zona pelo nível dela (spec 032) contra o do jogador.
+local function zoneCostFn()
+    local L = UnitLevel("player")
+    return function(zone)
+        local ok, lo, hi = pcall(ns.Guide.ZoneLevels, zone)
+        if not ok then lo, hi = nil, nil end
+        return ns.Gates.DangerCost(lo, hi, L)
+    end
+end
+Gps.ZoneCost = zoneCostFn
+
 -- R5: distância a pé entre dois pontos com zona, pelas passagens; sem caminho conhecido, a reta.
 function Gps.WalkFn(cont)
     local list = gateList(cont)
+    local opts = { zoneCost = zoneCostFn() } -- spec 064, R3
     return function(a, b)
         if a.zone and b.zone and a.zone ~= b.zone then
-            local ok, r = pcall(ns.Gates.Route, list, a, b)
+            local ok, r = pcall(ns.Gates.Route, list, a, b, nil, opts)
             if ok and r then return r.yd end
         end
         local dx, dy = a.x - b.x, a.y - b.y
@@ -188,9 +220,21 @@ function Gps.UpdateGate()
         local pz, tz = playerZone(), targetZone(t)
         if cont and cont == t.world[1] and pz and tz and pz ~= tz then
             local ok, r = pcall(ns.Gates.Route, gateList(cont), { zone = pz, x = px, y = py },
-                { zone = tz, x = t.world[2], y = t.world[3] })
+                { zone = tz, x = t.world[2], y = t.world[3] }, nil, { zoneCost = zoneCostFn() }) -- spec 064, R3
             if not ok then ns.FP.Debug("gps: passagem descartada: " .. tostring(r)) end
             gate = ok and r and r.gates[1] or nil
+            -- R4: o caminho ainda passa por zona bem acima do nível (não havia outro): avisa na seta
+            t.danger = nil
+            if ok and r then
+                local L = UnitLevel("player")
+                for _, s in ipairs(r.gates) do
+                    local okL, lo, hi = pcall(ns.Guide.ZoneLevels, s.to)
+                    if okL and lo and s.to ~= tz and ns.Gates.DangerCost(lo, hi, L) >= 10 then
+                        t.danger = string.format("%s (%s)", tostring(ns.Guide.AreaName(s.to)), ns.Zones.FormatRange(lo, hi))
+                        break
+                    end
+                end
+            end
             -- chegou perto da passagem e o jogo não trocou de zona: o ponto estimado errou; não mira de novo
             if gate and t.gatePassed and t.gatePassed == gateKey(gate) then gate = nil end
             if gate then -- pino no mapa da zona atual
@@ -256,7 +300,7 @@ end
 -- cavernas 151–392 jd (Beren's Peril, Wailing Caverns). Estimativa.
 local CAVE_MIN_REACH = 60
 local GATE_ARRIVE = 40 -- spec 049: a passagem é um ponto estimado; chegou perto, refaz
-local ROAD = { minDist = 400, maxAccess = 150, factor = 1.6, ahead = 30, offRoute = 60 }
+local ROAD = { minDist = 400, maxAccess = 150, maxAccessTo = 250, factor = 1.6, ahead = 30, offRoute = 60, tailMin = 40 }
 Gps.road = nil -- caminho de Roads.Path + dest, para o trecho a pé (até o alvo ou o ponto de voo)
 
 ------------------------------------------------------------------------------------------
@@ -347,6 +391,8 @@ ns.FP.On("READY", function()
     end) end
 end)
 
+local roadJumpCheck -- spec 034, R7a (definida com a malha, abaixo)
+
 -- R11/R12/R13: caminho para o trecho a pé; reaproveita o atual se o destino não mudou.
 local function planRoad()
     local t = Gps.target
@@ -363,13 +409,14 @@ local function planRoad()
     local cur = Gps.road
     if cur and cur.dest.x == dest.x and cur.dest.y == dest.y then return cur end
     if InCombatLockdown() then return nil end -- constituição 6: nada pesado em combate
-    local path = Gps.PlanRoad({ x = px, y = py }, dest, graphs[cont], ROAD)
+    local path = Gps.PlanRoad({ x = px, y = py }, dest, graphs[cont], ROAD, roadJumpCheck(cont))
     if not path then return nil end
     -- R9/R10: a rota seguida começa no jogador e termina no destino (acessos inclusos)
     local route = { { x = px, y = py } }
     for _, pt in ipairs(path.points) do route[#route + 1] = pt end
     route[#route + 1] = dest
     path.dest, path.route, path.aim = dest, route, { lost = ROAD.offRoute }
+    path.tailFrom = Gps.TailNeeded(path, dest, roadJumpCheck(cont), ROAD.tailMin) -- R8b
     return path
 end
 
@@ -403,6 +450,17 @@ local function navCell(cont)
         if not row then row = ns.Nav.Row(G.lines[r]); rows[r] = row end
         return row[c] or 0
     end, G
+end
+
+-- Spec 034, R7a: o pulo entre pontas de estrada só vale se a malha tiver chão ligado no meio.
+-- Uma função por continente (o Roads.Path guarda o preparo do grafo por ela).
+local jumpChecks = {}
+roadJumpCheck = function(cont)
+    if jumpChecks[cont] == nil then
+        local cell, G = navCell(cont)
+        jumpChecks[cont] = cell and function(ax, ay, bx, by) return ns.Nav.Clear(cell, G, ax, ay, bx, by) end or false
+    end
+    return jumpChecks[cont] or nil
 end
 
 -- Célula do ponto; numa célula sem saída (encosta, prédio), a transitável mais perto (até 3).
@@ -439,14 +497,14 @@ local function updateNav()
     if not cont or cont ~= t.world[1] then Gps.nav = nil; return end
     if Gps.nav then return end
     local dx, dy = px - dest.x, py - dest.y
-    if math.sqrt(dx * dx + dy * dy) <= NAV.minDist then return end
+    if math.sqrt(dx * dx + dy * dy) <= NAV.minDist then Gps.navNone = nil; return end -- parecer 050-053: perto, sem aviso
     local cell, G = navCell(cont)
     if not cell then return end
     local from, to = navSnap(cell, G, px, py), navSnap(cell, G, dest.x, dest.y)
     local key = string.format("%d:%d>%d:%d", from[1], from[2], to[1], to[2])
     if navFailed == key then return end
     navRunning = ns.FP.RunCoroutine("nav", function(yield)
-        return ns.Nav.Path(cell, from, to, { yield = yield, margin = 60, max = 120000 })
+        return ns.Nav.Path(cell, from, to, { yield = yield, margin = 60, max = 120000, links = G.links }) -- spec 060, R6
     end, function(ok, path)
         navRunning = false
         if not ok then ns.FP.Debug("gps: caminho descartado: " .. tostring(path)); navFailed = key; return end
@@ -454,9 +512,10 @@ local function updateNav()
         if not path then
             ns.FP.Debug("gps: sem caminho pelo relevo")
             navFailed, Gps.nav = key, nil
+            Gps.navNone = dest -- spec 050, R5: a seta avisa que não achou caminho a pé
             return
         end
-        navFailed = nil
+        navFailed, Gps.navNone = nil, nil
         local route = { { x = px, y = py } }
         for i = 2, #path - 1 do
             route[#route + 1] = { x = G.x0 - (path[i][1] - 0.5) * G.cell, y = G.y0 - (path[i][2] - 0.5) * G.cell }
@@ -467,13 +526,47 @@ local function updateNav()
     end) or false
 end
 
+-- Spec 034, R8b: o fim da estrada até o destino pela malha, em corrotina (constituição 5 e 6).
+-- Sem caminho, fica a reta de antes.
+local tailRunning = false
+local tailFailed -- { x, y } do destino sem caminho pela malha: não refaz a busca (parecer 034-r8b)
+local function updateRoadTail()
+    local road = Gps.road
+    if not (road and road.tailFrom) or road.tailDone or tailRunning then return end
+    if sameDest(tailFailed, road.dest) then road.tailDone = true; return end
+    local cont = playerWorld()
+    local cell, G = navCell(cont)
+    if not cell then road.tailDone = true; return end
+    local from, to = navSnap(cell, G, road.tailFrom.x, road.tailFrom.y), navSnap(cell, G, road.dest.x, road.dest.y)
+    tailRunning = ns.FP.RunCoroutine("roadtail", function(yield)
+        return ns.Nav.Path(cell, from, to, { yield = yield, margin = 20, max = 20000, links = G.links })
+    end, function(ok, path)
+        tailRunning = false
+        road.tailDone = true
+        if Gps.road ~= road then return end
+        if not (ok and path) then
+            tailFailed = { x = road.dest.x, y = road.dest.y }
+            ns.FP.Debug("gps: fim da estrada em reta (sem caminho pela malha): " .. tostring(path))
+            return
+        end
+        local pts = {}
+        for i = 2, #path - 1 do
+            pts[#pts + 1] = { x = G.x0 - (path[i][1] - 0.5) * G.cell, y = G.y0 - (path[i][2] - 0.5) * G.cell }
+        end
+        road.route = Gps.WithTail(road.route, pts)
+        ns.FP.Debug(string.format("gps: fim da estrada pela malha (%d células)", #path))
+    end) or false
+end
+
 -- Título mostrado na seta (R2): com trecho de voo, "Voar: A > B · depois: <título>".
 function Gps.ShownTitle()
     local t = Gps.target
     if not t then return nil end
     local leg = Gps.leg
     if not leg then
-        if Gps.gate then return ns.Gates.Title(Gps.gate, ns.Guide.AreaName, t.title) end -- spec 049, R4
+        if Gps.gate then -- spec 049, R4; spec 064, R4: aviso de zona perigosa no caminho
+            return ns.Gates.Title(Gps.gate, ns.Guide.AreaName, t.title) .. (t.danger and (" · cuidado: " .. t.danger) or "")
+        end
         if Gps.door then return ns.Caves.Title(Gps.door, t.title) end -- spec 038, R6
         return t.title
     end
@@ -602,6 +695,7 @@ function Gps.UpdateArrow(f)
     -- Spec 050, R3/R4: sem estrada, o caminho pelo relevo; longe dele, descarta e o ticker refaz.
     local nav = not Gps.road and Gps.nav or nil
     if nav and not sameDest(nav.dest, walkDest(t)) then nav = nil end -- parecer 050-052: caminho de outro destino
+    local noPath = not Gps.road and not nav and sameDest(Gps.navNone, walkDest(t)) -- spec 050, R5
     if nav then
         local okAim, aim, off, left = pcall(ns.Roads.Aim, nav.route, { x = px, y = py }, NAV.ahead, nav.aim)
         if not okAim or not aim or off > NAV.offRoute then
@@ -614,7 +708,7 @@ function Gps.UpdateArrow(f)
     end
     local rel, aimDist = Gps.Relative(px, py, aimX, aimY, facing)
     f.tex:SetRotation(rel)
-    f.dist:SetText(distText or string.format("%d yd", aimDist))
+    f.dist:SetText(distText or string.format(noPath and "%d yd (sem caminho a pé conhecido)" or "%d yd", aimDist))
     if dist <= (ns.FP.db.gps.arriveYards or 12) and not t.arrived then
         t.arrived = true
         ns.FP.Debug(string.format("gps: chegou (%d yd) %s", dist, tostring(t.title)))
@@ -701,6 +795,7 @@ function Gps.SetTarget(mapID, x, y, title)
     Gps.UpdateGate() -- spec 049
     Gps.UpdateDoor() -- spec 038
     updateRoad()
+    updateRoadTail() -- spec 034, R8b
     updateNav() -- spec 050
     if not ticker and C_Timer and C_Timer.NewTicker then ticker = C_Timer.NewTicker(REROUTE_EVERY, Gps.Reroute) end
     if db.arrow then arrow = arrow or buildArrow() end
@@ -726,6 +821,7 @@ function Gps.Reroute()
     local gateChanged = Gps.UpdateGate() -- spec 049
     if Gps.UpdateDoor() or legChanged or gateChanged then showWaypoint() end -- spec 038
     updateRoad()
+    updateRoadTail() -- spec 034, R8b
     updateNav() -- spec 050
 end
 

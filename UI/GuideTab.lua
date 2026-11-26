@@ -13,7 +13,7 @@ local function build(panel)
     local follow = Theme.Button(panel, "Recalcular rota", 110, 24, function() ns.Guide.FollowBest() end, "primary")
     follow:SetPoint("TOPLEFT", 0, -4)
     local followSel = Theme.Button(panel, "Seguir este hub", 100, 24, function()
-        if selected == "__bags" then ns.Guide.FollowBag()
+        if selected == "__bags" then ns.EssentialsGuide.FollowFirst() -- spec 062, R3
         elseif selected == "__class" then ns.ClassGuide.Follow()
         elseif selected then ns.Guide.Follow(selected) end
     end)
@@ -22,8 +22,8 @@ local function build(panel)
         ns.Gps.Clear(); ns.FP.db.guide = nil; api.Refresh()
     end)
     stop:SetPoint("LEFT", followSel, "RIGHT", 6, 0)
-    -- Hub especial "Bolsas" (spec 010): mostra a lista no detalhe; "Seguir este hub" segue a melhor.
-    local bags = Theme.Button(panel, "Bolsas", 54, 24, function() selected = "__bags"; api.Refresh() end)
+    -- Spec 062: "Essenciais" no lugar de "Bolsas" (spec 010): a lista de verificação e, embaixo, as quests de bolsa.
+    local bags = Theme.Button(panel, "Essenciais", 68, 24, function() selected = "__bags"; api.Refresh() end)
     bags:SetPoint("LEFT", stop, "RIGHT", 6, 0)
     -- Hub especial "Classe" (spec 011, R3): quests de classe de qualquer zona.
     local classBtn = Theme.Button(panel, "Classe", 54, 24, function() selected = "__class"; api.Refresh() end)
@@ -104,20 +104,23 @@ local function build(panel)
         row.text:SetPoint("LEFT", 2, 0); row.text:SetPoint("RIGHT", -2, 0)
         row.text:SetJustifyH("LEFT"); row.text:SetWordWrap(false)
         row:SetScript("OnClick", function(self, button)
+            if self.header then return end -- o título "Quests de bolsa" não é clicável
+            if self.ess then ns.EssentialsGuide.Go(self.ess.key); return end -- spec 062, R4
             if not self.bag then return end
             -- O CHANGED disparado por seguir ou dispensar redesenha a aba (um render só).
             if button == "RightButton" then ns.Guide.ToggleBagSkip(self.bag.q) else ns.Guide.FollowBagQuest(self.bag.q) end
         end)
         row:SetScript("OnEnter", function(self)
+            if self.header then return end
             self:SetBackdropColor(unpack(Theme.c.hover))
-            showBagTip(self)
+            if self.bag then showBagTip(self) else GameTooltip:Hide() end
         end)
         row:SetScript("OnLeave", function(self) self:SetBackdropColor(0, 0, 0, 0); GameTooltip:Hide() end)
         bagRows[i] = row
         return row
     end
     local function hideBagRows(from)
-        for i = from, #bagRows do bagRows[i]:Hide(); bagRows[i].bag = nil end
+        for i = from, #bagRows do bagRows[i]:Hide(); bagRows[i].bag = nil; bagRows[i].ess = nil; bagRows[i].header = nil end
     end
 
     local function showTooltip(row)
@@ -160,8 +163,12 @@ local function build(panel)
 
     local function circuitText(r)
         local c, names, lines = r.circuit, r.circuit.names, {}
-        lines[#lines + 1] = string.format("|cFFB38CFF%s|r  ·  %s XP/h  ·  %.0f min", r.name,
-            Util.FormatInt(c.rate), c.seconds / 60)
+        -- spec 063, R5: quão difícil é o hub ("mobs −3"), pelas kills pendentes das paradas de objetivo
+        local diff = ns.Leveling.MobDiff(c.stops, UnitLevel("player"))
+        local mobs = diff and string.format("  ·  mobs %s%.0f", diff >= 0 and "+" or "−", math.abs(diff)) or ""
+        lines[#lines + 1] = string.format("|cFFB38CFF%s|r  ·  %s XP/h  ·  %.0f min%s%s", r.name,
+            Util.FormatInt(c.rate), c.seconds / 60, mobs,
+            ns.Leveling.EasyActive(ns.FP.db.easyMode, UnitLevel("player")) and "  ·  modo fácil" or "")
         for i, s in ipairs(c.stops) do
             local qs = {}
             for _, q in ipairs(s.quests) do qs[#qs + 1] = names[q] or tostring(q) end
@@ -210,16 +217,37 @@ local function build(panel)
         local sel
         for _, r in ipairs(data) do if r.key == selected then sel = r end end
         if selected == "__bags" then
-            local bagList = ns.Data.ready and ns.Data.BagQuests(UnitLevel("player")) or {}
-            detail:SetText("|cFFB38CFFBolsas|r  ·  Seguir este hub vai à melhor  ·  clique numa quest para segui-la"
-                .. "  ·  botão direito dispensa" .. (#bagList == 0 and "\n|cFF888888nenhuma quest de bolsa para este personagem.|r" or ""))
+            -- Spec 062, R3: a lista de verificação primeiro, uma linha por item (cor pelo estado).
+            local ok, ess = pcall(ns.EssentialsGuide.List)
+            ess = ok and ess or {}
+            detail:SetText("|cFFB38CFFEssenciais|r  ·  clique numa linha para a seta ir lá  ·  Seguir este hub vai ao primeiro pendente")
             local top = detail:GetStringHeight() + 4
-            local following = ns.FP.db.following
-            for i, b in ipairs(bagList) do
+            local COLOR = { pendente = "FFFF6666", conferir = "FFB0B0FF", depois = "FFFFD14D", feito = "FF73E65A" }
+            for i, it in ipairs(ess) do
                 local row = bagRow(i)
-                row.bag = b
+                row.bag, row.ess, row.header = nil, it, nil
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", 0, -top - (i - 1) * BAG_ROW_H); row:SetPoint("RIGHT", scroll.child, "RIGHT")
+                row.text:SetText(string.format("|c%s%s|r  %s  |cFF888888%s|r", COLOR[it.status] or "FFFFFFFF", it.status, it.label, it.detail))
+                row:Show()
+            end
+            local base = #ess
+            top = top + base * BAG_ROW_H + 6
+            local bagList = ns.Data.ready and ns.Data.BagQuests(UnitLevel("player")) or {}
+            local head = bagRow(base + 1)
+            head.bag, head.ess, head.header = nil, nil, true
+            head:ClearAllPoints()
+            head:SetPoint("TOPLEFT", 0, -top); head:SetPoint("RIGHT", scroll.child, "RIGHT")
+            head.text:SetText("|cFFB38CFFQuests de bolsa|r  |cFF888888clique segue · botão direito dispensa|r"
+                .. (#bagList == 0 and "  |cFF888888(nenhuma para este personagem)|r" or ""))
+            head:Show()
+            top = top + BAG_ROW_H
+            local following = ns.FP.db.following
+            for j, b in ipairs(bagList) do
+                local row = bagRow(base + 1 + j)
+                row.bag, row.ess, row.header = b, nil, nil
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", 0, -top - (j - 1) * BAG_ROW_H); row:SetPoint("RIGHT", scroll.child, "RIGHT")
                 local s = b.step or b
                 local mark = following == s.q and "|cFF73E65A> |r" or "  "
                 local item = (b.itemName or "bolsa") .. (b.bonus and " (bônus de XP)" or "") -- R9
@@ -235,7 +263,7 @@ local function build(panel)
                 row:Show()
                 if GameTooltip:IsOwned(row) then showBagTip(row) end -- a linha sob o mouse pode ter mudado de quest
             end
-            hideBagRows(#bagList + 1)
+            hideBagRows(base + 2 + #bagList)
             scroll.child:SetHeight(top + #bagList * BAG_ROW_H + 10)
             return
         end

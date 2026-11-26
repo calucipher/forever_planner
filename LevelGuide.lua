@@ -269,7 +269,12 @@ function LevelGuide.Trail(L, yield)
     local D, G, Z = ns.Data, ns.Guide, ns.Zones
     local cat = D.zoneCatalog
     if not (cat and D.Q and D.ready) then return nil end
-    L = L or UnitLevel("player")
+    local easy = false
+    if not L then -- spec 063, R4: só o nível do personagem; o pedido à mão fica como está
+        L = UnitLevel("player")
+        easy = ns.Leveling.EasyActive(ns.FP.db.easyMode, L)
+        if easy then L = math.max(1, L - 3) end
+    end
     local lo, hi = Z.Bracket(L)
     local _, hereMap = G.PlayerArea()
     local player = ns.Planner.PlayerPoint() or { mapID = hereMap }
@@ -316,7 +321,7 @@ function LevelGuide.Trail(L, yield)
         local x, y = a.best or a.act, b.best or b.act
         return (x.minLevelSuggestion or 0) < (y.minLevelSuggestion or 0)
     end)
-    return { lo = lo, hi = hi, level = L, steps = steps, current = current, dungeons = dungeons,
+    return { lo = lo, hi = hi, level = L, easy = easy, steps = steps, current = current, dungeons = dungeons,
         hearth = current and hearthFor(current.zones[1]) or nil }
 end
 

@@ -5,7 +5,7 @@ ns = ns or {}
 local Zones = {}
 ns.Zones = Zones
 
-local floor, max, min = math.floor, math.max, math.min
+local floor, min = math.floor, math.min
 
 -- XP para passar de nível no Classic (1->2 ... 59->60), igual no Forever.
 Zones.LEVEL_XP = { 400, 900, 1400, 2100, 2800, 3600, 4500, 5400, 6500, 7600, 8800, 10100, 11400, 12900,
@@ -41,10 +41,12 @@ function Zones.GrindRate(hist, L, p)
     local spawns, xp, secs = 0, 0, 0
     for l, s in pairs(hist or {}) do
         local x = ns.Leveling.MobXP(L, l, p.factor or 1)
-        if x > 0 and l <= L + 2 then
+        local inRange = l <= L + 2
+        if p.easy then inRange = l >= L - 4 and l <= L - 2 end -- spec 063, R3: modo fácil
+        if x > 0 and inRange then
             spawns = spawns + s
             xp = xp + x * s
-            secs = secs + s * p.perKill * (1 + 0.1 * max(0, l - L)) -- mob acima do nível demora mais
+            secs = secs + s * p.perKill * ns.Leveling.KillFactor(l, L) -- spec 063, R1
         end
     end
     if spawns < (p.minSpawns or 0) or secs <= 0 then return 0, spawns end

@@ -181,7 +181,10 @@ function FP.MobTolerance()
     local combat, recentDeath = L.CombatOffset(danger)
     local avg = FP.GearItemLevel()
     local source = combat and "combate" or (avg and "gear" or "padrão")
-    return L.MobTolerance(L.GearOffset(avg, UnitLevel("player")), combat, recentDeath), source, #danger
+    local tol = L.MobTolerance(L.GearOffset(avg, UnitLevel("player")), combat, recentDeath)
+    local easy = L.EasyActive(FP.db.easyMode, UnitLevel("player")) -- spec 063, R2a
+    if easy then source = "modo fácil" end
+    return L.EasyTolerance(tol, easy), source, #danger -- spec 063, R2
 end
 
 -- /fp calib e o botão "Calibração" do menu + (spec 031, R9)
@@ -189,7 +192,7 @@ function FP.PrintCalib()
     FP.Print(string.format("tempo por morte: %.1f s (%d amostras) · fator de XP: %.2f (%d amostras)",
         FP.KillSeconds(), #FP.db.calib.kill, FP.MobXPFactor(), #FP.db.calib.xp))
     local tol, source, n = FP.MobTolerance()
-    FP.Print(string.format("tolerância de mobs altos: +%.1f nível (fonte: %s, %d lutas; estimativa)",
+    FP.Print(string.format("tolerância de mobs altos: %+.1f nível (fonte: %s, %d lutas; estimativa)",
         tol, source, n))
 end
 
@@ -328,6 +331,7 @@ local EVENTS = {
     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "LOOT_OPENED", "TIME_PLAYED_MSG", "PLAYER_LOGOUT",
     { "LEARNED_SPELL_IN_SKILL_LINE", "LEARNED_SPELL_IN_TAB" }, -- renomeado no Mainline 11.0
     "TRAINER_SHOW", -- spec 055, R2
+    "BAG_UPDATE_DELAYED", "SKILL_LINES_CHANGED", -- spec 061: cache da venda
 }
 FP.missingEvents = {}
 local frame = CreateFrame("Frame")
@@ -435,6 +439,10 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         FP.Fire("CHANGED")
     elseif event == "TRAINER_SHOW" then
         FP.Fire("TRAINER_SHOW")
+    elseif event == "BAG_UPDATE_DELAYED" then
+        FP.Fire("BAGS") -- spec 061
+    elseif event == "SKILL_LINES_CHANGED" then
+        FP.Fire("SKILLS") -- spec 061
     elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
         OnXPGain(arg1)
     elseif event == "GET_ITEM_INFO_RECEIVED" then

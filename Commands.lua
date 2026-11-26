@@ -152,6 +152,12 @@ Commands.list = {
         run = function() ns.Guide.FollowBest() end },
     { id = "next", label = "Seguir a melhor quest", section = "Rota", kind = "acao",
         tip = "Aponta a seta para a melhor quest sozinha (sem hub)", run = function() ns.Planner.FollowBest() end },
+    { id = "pular", label = "Pular esta parada", section = "Rota", kind = "acao",
+        tip = "A parada atual do hub sai da rota por 10 minutos (NPC ausente, área cheia) (spec 059, R7)",
+        run = function() ns.Guide.SkipCurrent() end },
+    { id = "essenciais ir", label = "Essenciais", section = "Personagem", kind = "acao",
+        tip = "Seta no primeiro essencial pendente: treino, bolsa, pedra de lar, ponto de voo... (spec 062)",
+        run = function() ns.EssentialsGuide.FollowFirst() end },
     { id = "entregar", label = "Ir entregar", section = "Rota", kind = "acao",
         tip = "Hub mais perto com quests prontas para entregar", run = function() ns.Guide.FollowBest("turnin") end },
     { id = "voo", label = "Ponto de voo", section = "Rota", kind = "acao",
@@ -174,6 +180,15 @@ Commands.list = {
     { id = "grupo quests", label = "Quests de grupo", section = "Rota", kind = "lista", arg = "[limpar]",
         tip = "Quests de elite ou masmorra do log e a escolha de cada uma (pular ou fazer em grupo); 'limpar' pergunta de novo (spec 054)",
         run = function(rest) ns.Guide.PrintGroupQuests(rest) end },
+    { id = "modo facil", label = "Modo fácil", section = "Rota", kind = "liga",
+        tip = "Prefere mobs de 4 a 2 níveis abaixo: quest com mobs no seu nível ou acima sai da rota até você subir (spec 063)",
+        state = function() return db().easyMode == true end,
+        run = function()
+            db().easyMode = db().easyMode ~= true
+            FP().Print("modo fácil:", onOff(db().easyMode))
+            if ns.Guide then ns.Guide.Invalidate() end
+            FP().Fire("CHANGED")
+        end },
     { id = "indisponiveis", label = "Indisponíveis", section = "Rota", kind = "lista",
         tip = "Quests que o jogo não ofereceu e saíram do plano", run = listUnavailable },
     { id = "indisponiveis limpar", label = "Reativar quests", section = "Rota", kind = "acao",
@@ -203,6 +218,12 @@ Commands.list = {
     { id = "treinar", label = "Treinar", section = "Personagem", kind = "acao",
         tip = "Seta no treinador da classe mais perto e a lista do que falta aprender, com os novos do Forever (spec 051)",
         run = function() ns.ClassGuide.FollowClassTrainer() end },
+    { id = "essenciais", label = "Essenciais", section = "Personagem", kind = "lista",
+        tip = "O que o personagem não pode esquecer: bolsa, treino, montaria, pedra de lar, ponto de voo, comida (spec 062)",
+        run = function() ns.EssentialsGuide.Print() end },
+    { id = "venda", label = "Vender, leiloar ou desencantar", section = "Personagem", kind = "lista",
+        tip = "O melhor destino de cada item das bolsas: vendedor, leilão (preço visto na AH) ou desencantar (spec 061)",
+        run = function() ns.EconomyGuide.Print() end },
     { id = "treinar tudo", label = "Treinar tudo", section = "Personagem", kind = "acao",
         tip = "Com a janela do treinador aberta, compra todos os feitiços disponíveis que o dinheiro der (spec 055)",
         run = function() ns.ClassGuide.TrainAll() end },
@@ -267,6 +288,9 @@ Commands.list = {
             ns.FP.Fire("DUNGEONS")
         end,
         state = function() return ns.DungeonGuide.db().pins ~= false end },
+    { id = "voos lista", label = "Pontos de voo do mapa (diagnóstico)", section = "Registro", kind = "lista",
+        tip = "O que o jogo devolve de pontos de voo para o mapa aberto e o que o addon mostra; grava para relatar",
+        run = function() ns.FlightPins.Diag() end },
     { id = "voos", label = "Pontos de voo no mapa", section = "Interface", kind = "liga",
         tip = "Pontos de voo no mapa-múndi: verde descoberto, vermelho a descobrir (spec 044)",
         run = function()

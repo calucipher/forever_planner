@@ -83,15 +83,81 @@ end
 
 -- Preparo do grafo (polilinhas e vizinhança), guardado por grafo.
 local prepared = setmetatable({}, { __mode = "k" })
-local function prepare(g)
+-- Spec 034, R7a: ponta de estrada liga ao nó mais perto a até JUMP jd que a estrada não alcança
+-- em até JUMP_GAIN × a reta (não o vizinho da própria aresta), com custo JUMP_COST × a distância.
+-- Com canJump(ax, ay, bx, by), só o pulo que o terreno deixa (o GPS passa a malha da spec 050).
+-- Medido no Content/Roads.lua de 26/11/2026 (Lua do desktop): ~80 ms no continente 0, uma vez por sessão.
+Roads.JUMP, Roads.JUMP_COST, Roads.JUMP_GAIN = 150, 1.5, 2
+local function edgeLen(pts)
+    local s = 0
+    for k = 3, #pts, 2 do s = s + dist(pts[k - 2], pts[k - 1], pts[k], pts[k + 1]) end
+    return s
+end
+
+-- Distância pela estrada de i a cada nó até limit jd (Dijkstra simples: o raio é pequeno).
+local function roadNear(adj, i, limit)
+    local d, done = { [i] = 0 }, {}
+    while true do
+        local u, du
+        for k, v in pairs(d) do if not done[k] and (not du or v < du) then u, du = k, v end end
+        if not u then return d end
+        done[u] = true
+        for _, nb in ipairs(adj[u] or {}) do
+            local v = du + nb.len
+            if v <= limit and (d[nb.to] == nil or v < d[nb.to]) then d[nb.to] = v end
+        end
+    end
+end
+
+local function jumps(g, canJump)
+    local n, adj, deg, out = #g.nodes / 2, {}, {}, {}
+    for _, e in ipairs(g.edges) do
+        local l = edgeLen(e.pts)
+        adj[e.a] = adj[e.a] or {}; adj[e.b] = adj[e.b] or {}
+        table.insert(adj[e.a], { to = e.b, len = l }); table.insert(adj[e.b], { to = e.a, len = l })
+        deg[e.a] = (deg[e.a] or 0) + 1; deg[e.b] = (deg[e.b] or 0) + 1
+    end
+    for i = 1, n do
+        if deg[i] == 1 then
+            local xi, yi = g.nodes[2 * i - 1], g.nodes[2 * i]
+            local cands = {}
+            for k = 1, n do
+                if k ~= i then
+                    local d = dist(xi, yi, g.nodes[2 * k - 1], g.nodes[2 * k])
+                    if d <= Roads.JUMP then cands[#cands + 1] = { k = k, d = d } end
+                end
+            end
+            if cands[1] then
+                table.sort(cands, function(a, b) return a.d < b.d end)
+                local road = roadNear(adj, i, Roads.JUMP_GAIN * Roads.JUMP)
+                for _, c in ipairs(cands) do
+                    local r = road[c.k]
+                    local xk, yk = g.nodes[2 * c.k - 1], g.nodes[2 * c.k]
+                    if not (r and r <= Roads.JUMP_GAIN * c.d) and (not canJump or canJump(xi, yi, xk, yk)) then
+                        out[#out + 1] = { a = i, b = c.k, pts = { xi, yi, xk, yk }, jump = true }
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function prepare(g, canJump)
     local p = prepared[g]
-    if p then return p end
-    p = { edges = {}, adj = {} }
-    for i, e in ipairs(g.edges) do
+    if p and p.canJump == canJump then return p end
+    p = { edges = {}, adj = {}, canJump = canJump }
+    local all = {}
+    for _, e in ipairs(g.edges) do all[#all + 1] = e end
+    for _, e in ipairs(jumps(g, canJump)) do all[#all + 1] = e end -- R7a
+    for i, e in ipairs(all) do
         local xs, ys = {}, {}
         for k = 1, #e.pts, 2 do xs[#xs + 1] = e.pts[k]; ys[#ys + 1] = e.pts[k + 1] end
         local pl = polyline(xs, ys)
         pl.a, pl.b = e.a, e.b
+        pl.jump = e.jump
+        pl.cost = e.jump and pl.len * Roads.JUMP_COST or pl.len -- R7a: o pulo custa mais que a estrada
         p.edges[i] = pl
         p.adj[e.a] = p.adj[e.a] or {}
         p.adj[e.b] = p.adj[e.b] or {}
@@ -102,11 +168,12 @@ local function prepare(g)
     return p
 end
 
--- Aresta mais próxima do ponto: índice, distância, posição s.
+-- Aresta mais próxima do ponto: índice, distância, posição s. R7a: nunca no meio de um pulo.
 local function nearestEdge(p, x, y)
     local bestI, bestD, bestS
     for i, pl in ipairs(p.edges) do
-        local d, s = project(pl, x, y)
+        local d, s
+        if not pl.jump then d, s = project(pl, x, y) end
         if d and (not bestD or d < bestD) then bestI, bestD, bestS = i, d, s end
     end
     return bestI, bestD, bestS
@@ -141,10 +208,11 @@ local function pop(heap)
     return top
 end
 
--- R7: menor caminho de from a to pelas estradas.
-function Roads.Path(g, from, to)
+-- R7: menor caminho de from a to pelas estradas. opts.canJump: R7a.
+-- Devolve points, accessFrom, accessTo, road (jardas pela estrada) e cost (o custo da busca).
+function Roads.Path(g, from, to, opts)
     if not (g and g.edges and g.edges[1] and from and to) then return nil end
-    local p = prepare(g)
+    local p = prepare(g, opts and opts.canJump)
     local ef, df, sf = nearestEdge(p, from.x, from.y)
     local et, dt, st = nearestEdge(p, to.x, to.y)
     if not (ef and et) then return nil end
@@ -175,7 +243,7 @@ function Roads.Path(g, from, to)
             local exit = exitCost[cur.node]
             if exit and (not best or cur.g + exit < best) then best, bestEnd = cur.g + exit, cur.node end
             for _, nb in ipairs(p.adj[cur.node] or {}) do
-                relax(nb.to, cur.g + p.edges[nb.edge].len, cur.node, nb.edge)
+                relax(nb.to, cur.g + p.edges[nb.edge].cost, cur.node, nb.edge)
             end
         end
     end
@@ -203,7 +271,9 @@ function Roads.Path(g, from, to)
         end
         slice(points, plT, side(plT, st, bestEnd), st)
     end
-    return { points = points, accessFrom = df, accessTo = dt, road = best }
+    local yd = 0 -- R7a: road em jardas de verdade, sem o fator do pulo
+    for k = 2, #points do yd = yd + dist(points[k - 1].x, points[k - 1].y, points[k].x, points[k].y) end
+    return { points = points, accessFrom = df, accessTo = dt, road = yd, cost = best }
 end
 
 -- R9: ponto ahead jardas à frente da projeção de pos; devolve (ponto, distância à polilinha, jardas até o fim).

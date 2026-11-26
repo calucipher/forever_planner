@@ -35,6 +35,32 @@ local function move(cell, r, c, dr, dc)
         and step(cell, r, c, 0, dc) and step(cell, r, c + dc, dr, 0)
 end
 
+-- Spec 034, R7a: a reta de (ax, ay) a (bx, by), em jardas do mundo, passa só por células ligadas
+-- da malha (G: x0, y0, cell de Content/Nav.lua)? Na diagonal, basta um dos dois caminhos em L.
+function Nav.Clear(cell, G, ax, ay, bx, by)
+    local function rc(x, y) return math.floor((G.x0 - x) / G.cell) + 1, math.floor((G.y0 - y) / G.cell) + 1 end
+    local dx, dy = bx - ax, by - ay
+    local steps = math.max(1, math.ceil(math.sqrt(dx * dx + dy * dy) / (G.cell / 2)))
+    local r, c = rc(ax, ay)
+    for s = 1, steps do
+        local nr, nc = rc(ax + dx * s / steps, ay + dy * s / steps)
+        if nr ~= r or nc ~= c then
+            local dr, dc = nr - r, nc - c
+            if math.abs(dr) > 1 or math.abs(dc) > 1 then return false end
+            local ok
+            if dr == 0 or dc == 0 then
+                ok = step(cell, r, c, dr, dc)
+            else
+                ok = (step(cell, r, c, dr, 0) and step(cell, r + dr, c, 0, dc))
+                    or (step(cell, r, c, 0, dc) and step(cell, r, c + dc, dr, 0))
+            end
+            if not ok then return false end
+            r, c = nr, nc
+        end
+    end
+    return true
+end
+
 -- Fila de prioridade (heap binário) de { f, key }.
 local function push(h, f, key)
     h[#h + 1] = { f, key }
@@ -80,6 +106,20 @@ function Nav.Path(cell, from, to, opts)
         local dr, dc = math.abs(r - to[1]), math.abs(c - to[2])
         return math.max(dr, dc) + (SQRT2 - 1) * math.min(dr, dc)
     end
+    -- Spec 060, R5: ligações desenhadas (elevador, portal) como vizinhos extras, nos dois sentidos.
+    local extra = {}
+    for _, l in ipairs((opts and opts.links) or {}) do
+        local a, b = { l[1], l[2] }, { l[3], l[4] }
+        local inA = a[1] >= r0 and a[1] <= r1 and a[2] >= c0 and a[2] <= c1
+        local inB = b[1] >= r0 and b[1] <= r1 and b[2] >= c0 and b[2] <= c1
+        if inA and inB then
+            local dr, dc = math.abs(a[1] - b[1]), math.abs(a[2] - b[2])
+            local cost = math.max(dr, dc) + (SQRT2 - 1) * math.min(dr, dc)
+            local ka, kb = key(a[1], a[2]), key(b[1], b[2])
+            extra[ka] = extra[ka] or {}; table.insert(extra[ka], { b[1], b[2], cost })
+            extra[kb] = extra[kb] or {}; table.insert(extra[kb], { a[1], a[2], cost })
+        end
+    end
     local g, prev, closed, heap = {}, {}, {}, {}
     local start = key(from[1], from[2])
     g[start] = 0
@@ -107,6 +147,14 @@ function Nav.Path(cell, from, to, opts)
                             push(heap, ng + h(nr, nc), nk)
                         end
                     end
+                end
+            end
+            for _, e in ipairs(extra[k] or {}) do -- R5
+                local nk = key(e[1], e[2])
+                local ng = g[k] + e[3]
+                if not closed[nk] and (not g[nk] or ng < g[nk]) then
+                    g[nk], prev[nk] = ng, k
+                    push(heap, ng + h(e[1], e[2]), nk)
                 end
             end
         end

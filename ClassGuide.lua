@@ -254,6 +254,16 @@ local function oldRanks()
     return M.OldRanks(slots, list, isKnown)
 end
 
+ClassGuide.OldRanks = oldRanks -- spec 062: contagem nos essenciais
+
+-- Spec 062: nomes das perícias de arma que faltam.
+function ClassGuide.MissingWeaponNames()
+    local faction = _G.UnitFactionGroup and _G.UnitFactionGroup("player")
+    local out = {}
+    for _, w in ipairs(M.MissingWeapons(classDef(), faction, isKnown, ClassGuide.IsEnabled)) do out[#out + 1] = w.name end
+    return out
+end
+
 -- R5: /fp ranks [trocar]
 function ClassGuide.Ranks(arg)
     local list = oldRanks()
@@ -275,6 +285,7 @@ function ClassGuide.Ranks(arg)
         if id == r.newId then done = done + 1 end -- parecer: conta só o que a barra confirmou
     end
     ns.FP.Print(string.format("%d de %d posição(ões) com o rank novo.", done, #list))
+    ns.FP.Fire("SPELLS") -- spec 062: os essenciais refazem a contagem
 end
 
 local ranksWarned, ranksPending = {}, false
@@ -294,10 +305,10 @@ ns.FP.On("LEARNED", function()
 end)
 
 -- Spec 051, R5: seta no treinador da classe mais perto (o do mesmo continente primeiro).
-function ClassGuide.FollowClassTrainer()
+function ClassGuide.FollowClassTrainer(always) -- always: seta mesmo sem feitiço novo (montaria de classe, spec 062)
     local level = UnitLevel("player")
     local missing = ClassGuide.MissingSpells(level)
-    if missing and #missing == 0 then
+    if missing and #missing == 0 and not always then
         ns.FP.Print(string.format("nada novo para treinar no nível %d.", level))
         return
     end

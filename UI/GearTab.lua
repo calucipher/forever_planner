@@ -74,9 +74,10 @@ end
 
 -- R5: eventos do leilão (só a UI registra eventos, constituição 5).
 local ah = CreateFrame("Frame")
-for _, ev in ipairs({ "AUCTION_HOUSE_SHOW", "ITEM_SEARCH_RESULTS_UPDATED" }) do pcall(ah.RegisterEvent, ah, ev) end
+for _, ev in ipairs({ "AUCTION_HOUSE_SHOW", "ITEM_SEARCH_RESULTS_UPDATED", "COMMODITY_SEARCH_RESULTS_UPDATED" }) do pcall(ah.RegisterEvent, ah, ev) end
 ah:SetScript("OnEvent", function(_, event, arg1)
     if event == "AUCTION_HOUSE_SHOW" then ns.GearGuide.AuctionOpened()
+    elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then ns.GearGuide.CommodityResults(arg1) -- spec 061, R6
     else ns.GearGuide.AuctionResults(arg1) end
 end)
 

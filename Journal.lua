@@ -270,7 +270,11 @@ ns.FP.On("KILL_XP", function(xp, name)
     -- Vários mobs com o mesmo nome (AoE, pet): o próximo conta desde esta morte, com o mesmo ID.
     if look then look.at = now end
 end)
+local lastDeath -- spec 064, R5: o PLAYER_DEAD vem duas vezes no Forever; uma morte por 30 s
 ns.FP.On("DIED", function()
+    local now = _G.GetTime()
+    if not Util.Throttle(lastDeath, now, 30) then return end
+    lastDeath = now
     local id
     if _G.UnitExists("target") and not _G.UnitIsPlayer("target") and (_G.UnitReaction("target", "player") or 5) <= 4 then
         _, id = Util.EntityFromGUID(_G.UnitGUID("target"))

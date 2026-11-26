@@ -76,12 +76,20 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 | `/fp macros` | Lista os feitiços das macros: ID, nome no seu client e se você conhece |
 | `/fp calib` | Mostra o tempo por morte e o fator de XP medidos nas suas últimas mortes |
 | `/fp stats <link>` | Mostra os stats que o client devolve para um item (serve de debug do score) |
+| `/fp essenciais` | Lista de verificação do personagem (bolsas, treino, ponto de voo, pedra de lar etc.): pendente, conferir, depois e feito |
+| `/fp venda` | Itens das bolsas: vale mais vender ao vendedor, leiloar ou desencantar |
+| `/fp modo facil` | Liga ou desliga o modo fácil (a partir do nível 10): quests e áreas com mobs de 2 a 4 níveis abaixo |
+| `/fp pular` | Pula a parada atual por 10 minutos, junto com as que dependem dela |
 
 - **Auto accept/turn-in**: aceita só as quests do plano (circuitos dos hubs da zona, a quest seguida e a continuação da que você acabou de entregar) e entrega sozinho. Quest fora do plano fica para você aceitar, com um aviso no chat. Na escolha de recompensa, pega o maior upgrade; sem upgrade, a que vende mais caro. Quest que cobra ouro não é entregue sozinha.
 - **Automações**: cada automação tem uma chave na aba Ferramentas (aceitar, entregar, escolher recompensa, seguir a próxima, pontos de voo na rota, entrega no caminho, marcar o voo, voar sozinho).
 - **Quest de elite ou masmorra**: ao aceitar, o addon pergunta "Pular" ou "Fazer em grupo". Elite em grupo volta à rota; a de masmorra aparece em `/fp masmorras`, junto da entrada.
 - **Treinar**: botão "Treinar" na aba Guia (`/fp treinar`) leva ao treinador da classe mais perto e lista o que falta, com as habilidades novas do Forever marcadas. Na janela do treinador, o chat mostra o custo total e "Treinar tudo" compra o que o dinheiro der. `/fp ranks` acha botões da barra com rank velho e `/fp ranks trocar` troca.
-- **Botão "+" ao lado da seta**: Melhor hub, Ir entregar e Limpar o log. A limpeza nunca toca em quest de classe, em cadeia que leva a upgrade ou a muito XP, nem em quest que não existia no Classic.
+- **Botão "+" ao lado da seta**: Recalcular, Ir entregar, Pular esta parada, Voo, Essenciais e Parar. A limpeza do log (`/fp limpar`) nunca toca em quest de classe, em cadeia que leva a upgrade ou a muito XP, nem em quest que não existia no Classic.
+- **NPC ausente**: se quem dá a quest ou a escolta não está no lugar, o guia dispensa a parada por 10 minutos e segue.
+- **Essenciais**: na aba Guia, o botão Essenciais mostra o que falta para o personagem (com as quests de bolsa embaixo) e a seta leva ao próximo item.
+- **Vender, leiloar ou desencantar**: o tooltip do item diz qual rende mais. O valor do desencanto é estimativa (tabela do Classic).
+- **Modo fácil** (desligado por padrão): a partir do nível 10, prefere quests e áreas com mobs abaixo do seu nível. Elite continua igual.
 - O guia fica no hub que você escolheu até ele acabar; aí segue primeiro o hub com entregas prontas. Entregas prontas são feitas assim que você chega no NPC.
 - **Botão do minimapa**: clique abre/fecha o painel, clique direito segue o melhor hub, arraste para mover. O addon também aparece no menu de addons do minimapa.
 - Na aba **Guia**, clique num hub para ver o circuito e em *Seguir este hub*. O GPS aponta a próxima parada e avança sozinho quando você pega, cumpre ou entrega.
@@ -96,6 +104,7 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 - Clique numa quest para o GPS segui-la.
 - Clique direito na seta para parar o GPS.
 - Quando você entrega a quest seguida, o GPS escolhe sozinho a próxima melhor (`autoNext`).
+- **Caminho a pé**: a seta segue a estrada quando compensa e, sem estrada, o relevo. Pula pequenos buracos entre estradas quando o terreno deixa, e o trecho final até um NPC longe da estrada segue o relevo. Ela evita atravessar zona de nível bem acima do seu e avisa "cuidado" quando não há outro caminho.
 
 ## De onde vêm os dados
 

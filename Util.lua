@@ -231,6 +231,19 @@ function Util.DungeonOnly(spawnLists, dungeons)
     return area or false
 end
 
+-- Spec 064, R5: vale de novo se a última vez foi há mais de `gap` segundos (ou nunca).
+function Util.Throttle(last, now, gap)
+    return last == nil or now - last > gap
+end
+
+-- Spec 059, R1: quest de escolta pelo texto dos objetivos.
+function Util.IsEscort(texts)
+    for _, t in ipairs(texts or {}) do
+        if type(t) == "string" and t:lower():find("escort", 1, true) then return true end
+    end
+    return false
+end
+
 -- Spec 057, R1: índice do destino pelo nome; sem igual, pelo nome antes da vírgula (sem maiúscula).
 function Util.TaxiPick(names, target)
     if not target then return nil end

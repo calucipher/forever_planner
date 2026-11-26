@@ -10,9 +10,12 @@ local MAP_TYPES = { [2] = true, [3] = true } -- continente e zona (R2); masmorra
 -- known: true verde, false vermelho, nil amarelo (a conferir, R2a).
 local function key(known) return known == nil and "check" or (known and "yes" or "no") end
 local COLOR = { yes = { 0.25, 1, 0.25 }, no = { 1, 0.2, 0.2 }, check = { 1, 0.85, 0.2 } }
--- Sem o atlas do ponto: indicador comum do jogo na cor certa.
-local FALLBACK = { yes = "Interface\\COMMON\\Indicator-Green", no = "Interface\\COMMON\\Indicator-Red",
-    check = "Interface\\COMMON\\Indicator-Yellow" }
+-- Emenda R2b da spec 044 (26/11/2026, visto no jogo: nos Barrens só os pontos dos vizinhos apareciam):
+-- o atlas que o jogo dá para o ponto (o da Horda, por exemplo) pode não existir no Forever, e o pino
+-- ficava invisível. Todo pino usa o atlas neutro, que aparece, tingido pela cor do estado; sem ele, o
+-- ícone da própria janela de voo do Forever (TaxiFrame.lua).
+local ATLAS = "TaxiNode_Neutral"
+local FALLBACK = "Interface\\TaxiFrame\\UI-Taxi-Icon-White"
 
 local pool = {}
 
@@ -49,16 +52,12 @@ local function acquire(canvas, i)
     return pin
 end
 
-local function paint(pin, p)
-    local color = COLOR[key(p.known)]
-    if p.atlas and pin.icon:SetAtlas(p.atlas) ~= false and pin.icon:GetAtlas() then
-        pin.icon:SetDesaturated(true)
-        pin.icon:SetVertexColor(color[1], color[2], color[3])
-    else
-        pin.icon:SetTexture(FALLBACK[key(p.known)])
-        pin.icon:SetDesaturated(false)
-        pin.icon:SetVertexColor(1, 1, 1)
-    end
+local function paint(pin)
+    local color = COLOR[key(pin.data.known)]
+    pin.icon:SetAtlas(ATLAS)
+    if not pin.icon:GetAtlas() then pin.icon:SetTexture(FALLBACK) end
+    pin.icon:SetDesaturated(true)
+    pin.icon:SetVertexColor(color[1], color[2], color[3])
 end
 
 local function hideFrom(i)
@@ -89,10 +88,11 @@ function Pins.Refresh(force)
     for i, p in ipairs(list) do
         local pin = acquire(canvas, i)
         pin.data = p
-        paint(pin, p)
+        paint(pin)
         pin:SetSize(SIZE, SIZE)
         pin:SetScale(1 / scale)
-        pin:SetFrameLevel(math.min(canvas:GetFrameLevel() + 1990, 9000)) -- logo abaixo dos de masmorra
+        -- spec 044, R2c: acima dos marcadores de quest (Sepulcher, hub de quest, ficava coberto)
+        pin:SetFrameLevel(math.min(canvas:GetFrameLevel() + 3000, 9500))
         pin:ClearAllPoints()
         pin:SetPoint("CENTER", canvas, "TOPLEFT", p.x / 100 * w * scale, -p.y / 100 * h * scale)
         pin:Show()
@@ -114,6 +114,33 @@ local function build()
     end)
     Pins.frame = f
     return f
+end
+
+-- Diagnóstico (/fp voos lista): o que o jogo devolve para o mapa aberto (ou o da zona) e o que fica.
+function Pins.Diag()
+    local map = _G.WorldMapFrame
+    local mapID = (map and map:IsShown() and map:GetMapID()) or (ns.Guide and ns.Guide.ZoneMap(C_Map.GetBestMapForUnit("player")))
+    local T, E = _G.C_TaxiMap, _G.Enum
+    if not (mapID and T and T.GetTaxiNodesForMap and E and E.FlightPathFaction) then ns.FP.Print("sem a API de voo agora."); return end
+    local ok, raw = pcall(T.GetTaxiNodesForMap, mapID)
+    if not ok or type(raw) ~= "table" then ns.FP.Print("GetTaxiNodesForMap falhou: " .. tostring(raw)); return end
+    local info = C_Map.GetMapInfo(mapID)
+    local kept = {}
+    for _, p in ipairs(ns.Planner.FlightNodes(mapID)) do kept[p.id] = p end
+    local out = { map = mapID, name = info and info.name, type = info and info.mapType, faction = (_G.UnitFactionGroup("player")),
+        show = T.ShouldMapShowTaxiNodes and T.ShouldMapShowTaxiNodes(mapID) or false, nodes = {} }
+    ns.FP.Print(string.format("mapa %s (%s, tipo %s): %d ponto(s) do jogo", tostring(mapID), tostring(out.name), tostring(out.type), #raw))
+    for _, n in ipairs(raw) do
+        local p = n.position
+        local x, y = p and p.x, p and p.y
+        local k = kept[n.nodeID]
+        local state = k and (k.known == true and "verde" or (k.known == false and "vermelho" or "amarelo")) or "fora"
+        local line = string.format("  %s · id %s · facção %s · %.3f, %.3f · %s", tostring(n.name), tostring(n.nodeID),
+            tostring(n.faction), x or -1, y or -1, state)
+        ns.FP.Print(line)
+        out.nodes[#out.nodes + 1] = line
+    end
+    ns.FP.db.voosDiag = out
 end
 
 -- R7: na janela de voo, o jogo diz quais pontos do continente o personagem conhece.

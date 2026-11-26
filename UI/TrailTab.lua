@@ -14,7 +14,7 @@ local function minutes(s) return math.max(1, math.floor((s or 0) / 60 + 0.5)) en
 local function trailLines(out, title, empty, tr)
     local G, LG = ns.Guide, ns.LevelGuide
     if not tr then title("Trilha"); empty("calculando (o catálogo de zonas ainda carrega)"); return end
-    title(string.format("Trilha %d–%d", tr.lo, tr.hi))
+    title(string.format("Trilha %d–%d%s", tr.lo, tr.hi, tr.easy and " (modo fácil)" or "")) -- spec 063, R4
     if #tr.steps == 0 then empty("nenhuma zona com quests da sua facção nesta faixa") end
     local here = G.PlayerArea()
     for i, st in ipairs(tr.steps) do
@@ -83,12 +83,12 @@ local function build(panel)
             return
         end
         local L = UnitLevel("player")
-        local key = string.format("%d:%d:%s", shownL or 0, L, tostring(ns.Guide.PlayerArea()))
+        local key = string.format("%d:%d:%s:%s", shownL or 0, L, tostring(ns.Guide.PlayerArea()), tostring(ns.FP.db.easyMode)) -- spec 063
         local now = _G.GetTime()
         -- R8: em corrotina e fora de combate (constituição 6); mostra o que tem e redesenha ao terminar.
         if not (cache.key == key and now - cache.at < CACHE_SECONDS) and not cache.running then
             cache.running = ns.FP.RunCoroutine("trail", function(yield)
-                return ns.LevelGuide.Trail(shownL or L, yield)
+                return ns.LevelGuide.Trail(shownL, yield) -- nil: o nível do personagem (e o modo fácil, spec 063)
             end, function(ok, res)
                 cache.running = false
                 if not ok then ns.FP.Debug("trilha falhou: " .. tostring(res)); res = nil end

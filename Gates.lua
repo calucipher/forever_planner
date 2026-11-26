@@ -32,19 +32,27 @@ end
 
 -- R3: caminho a pé mais curto de from a to pelas passagens (Dijkstra; o estado é a passagem cruzada
 -- e a zona onde se chega). from/to = { zone, x, y }. Devolve { gates = {...}, yd } ou nil.
-function Gates.Route(gates, from, to, dist)
+-- Spec 064, R1: opts.zoneCost(zone) multiplica o trecho dentro de cada zona intermediária;
+-- `yd` continua sendo a distância real do caminho escolhido.
+function Gates.Route(gates, from, to, dist, opts)
     dist = dist or span
+    local zoneCost, memo = opts and opts.zoneCost, {}
+    local function factor(zone)
+        if not zoneCost or zone == from.zone or zone == to.zone then return 1 end
+        if memo[zone] == nil then memo[zone] = zoneCost(zone) or 1 end -- R1a: uma consulta por zona
+        return memo[zone]
+    end
     if not (from.zone and to.zone) or from.zone == to.zone then return { gates = {}, yd = dist(from, to) } end
     local nodes = {}
     for _, g in ipairs(gates or {}) do
         nodes[#nodes + 1] = { g = g, zone = g.b, enter = g.a }
         nodes[#nodes + 1] = { g = g, zone = g.a, enter = g.b }
     end
-    local cost, prev, done = {}, {}, {}
+    local cost, prev, done, real = {}, {}, {}, {}
     for i, n in ipairs(nodes) do
-        if n.enter == from.zone then cost[i] = dist(from, n.g) end
+        if n.enter == from.zone then cost[i] = dist(from, n.g); real[i] = cost[i] end
     end
-    local best, bestEnd
+    local best, bestEnd, bestReal
     while true do
         local i, ci
         for k, c in pairs(cost) do
@@ -54,13 +62,14 @@ function Gates.Route(gates, from, to, dist)
         done[i] = true
         local n = nodes[i]
         if n.zone == to.zone then
-            local total = ci + dist(n.g, to)
-            if not best or total < best then best, bestEnd = total, i end
+            local leg = dist(n.g, to)
+            if not best or ci + leg < best then best, bestEnd, bestReal = ci + leg, i, real[i] + leg end
         end
         for k, m in ipairs(nodes) do
             if not done[k] and m.enter == n.zone and m.g ~= n.g then
-                local c = ci + dist(n.g, m.g)
-                if not cost[k] or c < cost[k] then cost[k], prev[k] = c, i end
+                local leg = dist(n.g, m.g)
+                local c = ci + leg * factor(n.zone) -- R1: o trecho dentro da zona n.zone
+                if not cost[k] or c < cost[k] then cost[k], prev[k], real[k] = c, i, real[i] + leg end
             end
         end
     end
@@ -70,7 +79,16 @@ function Gates.Route(gates, from, to, dist)
         table.insert(path, 1, { x = nodes[k].g.x, y = nodes[k].g.y, from = nodes[k].enter, to = nodes[k].zone, gate = nodes[k].g })
         k = prev[k]
     end
-    return { gates = path, yd = best }
+    return { gates = path, yd = bestReal }
+end
+
+-- Spec 064, R2: custo de atravessar uma zona pelo meio da faixa dela contra o nível do jogador.
+function Gates.DangerCost(lo, hi, L)
+    if not (lo and L) then return 1 end
+    local mid = hi and (lo + hi) / 2 or lo
+    if mid <= L + 2 then return 1 end
+    if mid <= L + 5 then return 3 end
+    return 10
 end
 
 -- R4: título da seta.

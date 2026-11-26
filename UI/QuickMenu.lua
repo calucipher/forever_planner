@@ -5,7 +5,8 @@ local Menu = {}
 ns.QuickMenu = Menu
 
 -- Spec 040: cada item é um id do registro (Commands.lua); rótulo, dica e ação vêm de lá.
-Menu.items = { "guia", "entregar", "bolsa", "classe", "voo", "armas", "grupo", "calib", "limpar", "indisponiveis limpar" }
+-- Spec 006, R9 (emenda de 25/11/2026): só o que se usa seguindo a seta; o resto fica na aba Ferramentas.
+Menu.items = { "guia", "entregar", "pular", "voo", "essenciais ir", "clear" }
 
 local function itemsFromRegistry()
     local byId, out = {}, {}

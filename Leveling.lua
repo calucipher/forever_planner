@@ -209,23 +209,39 @@ end
 function Leveling.OnTheWay(stops, extras, maxDetour, dist, anchor)
     local out, left, added, total = stops, {}, {}, 0
     for i, x in ipairs(extras or {}) do left[i] = x end
+    -- R4b: desvio de x entre a e b (a ou b nil = ponta), só com distâncias conhecidas e não negativo.
+    local function detour(a, x, b)
+        local ax = a and dist(a, x)
+        local xb = b and dist(x, b)
+        local ab = a and b and dist(a, b)
+        if (a and not ax) or (b and not xb) or (a and b and not ab) then return nil end
+        local c = (ax or 0) + (xb or 0) - (ab or 0)
+        if c < -1 then return nil end
+        return math.max(c, 0)
+    end
     while #left > 0 do
-        local bestI, bestOut, bestCost
+        local bestI, bestIdx, bestCost
         for i, x in ipairs(left) do
-            local o, cost = Leveling.InsertDetour(out, x, dist, maxDetour)
-            if anchor and out[1] then -- R4 (parecer): antes da primeira, medindo do ponto fixo
-                local c1 = legOf(dist, anchor, x.point) + legOf(dist, x.point, out[1].point) - legOf(dist, anchor, out[1].point)
-                if c1 <= maxDetour and (not cost or c1 < cost) then
-                    o, cost = { x }, c1
-                    for _, s in ipairs(out) do o[#o + 1] = s end
-                    x.round = out[1].round
+            for idx = 1, #out + 1 do
+                local a = out[idx - 1] and out[idx - 1].point or (idx == 1 and anchor or nil)
+                local b = out[idx] and out[idx].point
+                if (idx > 1 or anchor) and (a or b) then -- R4: antes da primeira só com o ponto fixo
+                    local c = detour(a, x.point, b)
+                    if c and c <= maxDetour and (not bestCost or c < bestCost) then bestI, bestIdx, bestCost = i, idx, c end
                 end
             end
-            if o and (not bestCost or cost < bestCost) then bestI, bestOut, bestCost = i, o, cost end
         end
         if not bestI then break end
-        added[#added + 1] = { stop = table.remove(left, bestI), cost = bestCost }
-        out, total = bestOut, total + bestCost
+        local x = table.remove(left, bestI)
+        x.round = (out[bestIdx - 1] or out[bestIdx] or {}).round
+        local o = {}
+        for k, s in ipairs(out) do
+            if k == bestIdx then o[#o + 1] = x end
+            o[#o + 1] = s
+        end
+        if bestIdx > #out then o[#o + 1] = x end
+        added[#added + 1] = { stop = x, cost = bestCost }
+        out, total = o, total + bestCost
     end
     if out == stops then -- R4: a lista recebida não muda
         out = {}
@@ -384,6 +400,44 @@ function Leveling.FlightStops(start, stops, red, ctx)
     return out, added, total
 end
 
+-- Spec 059, R4: quest dispensada até skips[q] (tempo do jogo)?
+function Leveling.SkipActive(skips, q, now)
+    local t = skips and skips[q]
+    return t ~= nil and now < t
+end
+
+-- Spec 059, R3: depois dos 30 s na parada "pegar": "nada", "esperar" (em combate) ou "dispensar".
+function Leveling.AbsentDecision(s)
+    if not s.same or s.dialog or not s.near then return "nada" end
+    if s.combat then return "esperar" end
+    return "dispensar"
+end
+
+-- Spec 059, R7: paradas sem as dispensadas pelo jogador (skips[id] = até quando) e, em cadeia, sem as
+-- que dependem delas (after com a key de uma tirada). Lista nova.
+function Leveling.FilterSkipped(stops, skips, now, idOf)
+    local gone, changed = {}, true
+    for _, s in ipairs(stops or {}) do
+        if Leveling.SkipActive(skips, idOf(s), now) and s.key then gone[s.key] = true end
+    end
+    local function out_(s)
+        if Leveling.SkipActive(skips, idOf(s), now) then return true end
+        for _, k in ipairs(s.after or {}) do if gone[k] then return true end end
+        return false
+    end
+    while changed do -- a cadeia pode ter vários elos
+        changed = false
+        for _, s in ipairs(stops or {}) do
+            if s.key and not gone[s.key] and out_(s) then gone[s.key] = true; changed = true end
+        end
+    end
+    local out = {}
+    for _, s in ipairs(stops or {}) do
+        if not out_(s) and not (s.key and gone[s.key]) then out[#out + 1] = s end
+    end
+    return out
+end
+
 -- Spec 006, R20: seguindo uma quest sem ponto de objetivo, por quê? nil = não falta objetivo (vai entregar).
 function Leveling.NoPointReason(objectives, dungeon)
     for _, o in ipairs(objectives or {}) do
@@ -468,9 +522,36 @@ local function pending(q)
 end
 
 -- Spec 030, R5: mob acima do jogador demora mais (+10% por nível, como o grind da spec 029).
+-- Spec 063, R1: mob abaixo morre mais rápido (−5% por nível, até 70%; estimativa, calibra pelo diário).
+Leveling.KILL_BELOW, Leveling.KILL_FLOOR = 0.05, 0.7
 function Leveling.KillFactor(avgLevel, playerLevel)
     if not (avgLevel and playerLevel) then return 1 end
-    return 1 + 0.1 * max(0, avgLevel - playerLevel)
+    if avgLevel >= playerLevel then return 1 + 0.1 * (avgLevel - playerLevel) end
+    return max(Leveling.KILL_FLOOR, 1 - Leveling.KILL_BELOW * (playerLevel - avgLevel))
+end
+
+-- Spec 063, R2a: o modo fácil só vale do nível 10 em diante.
+Leveling.EASY_MIN_LEVEL = 10
+function Leveling.EasyActive(easy, level)
+    return easy == true and (level or 0) >= Leveling.EASY_MIN_LEVEL
+end
+
+-- Spec 063, R2: no modo fácil, o corte de mobs altos vale acima de nível − 2.
+Leveling.EASY_TOP = -2
+function Leveling.EasyTolerance(tolerance, easy)
+    if not easy then return tolerance end
+    return math.min(tolerance or Leveling.EASY_TOP, Leveling.EASY_TOP)
+end
+
+-- Spec 063, R5: diferença média (ponderada pelas kills) dos mobs pendentes para o jogador.
+function Leveling.MobDiff(objectives, playerLevel)
+    local sum, n = 0, 0
+    for _, o in ipairs(objectives or {}) do
+        local k = o.kills or 0
+        if not o.done and k > 0 and o.avgLevel then sum, n = sum + k * (o.avgLevel - playerLevel), n + k end
+    end
+    if n == 0 then return nil end
+    return sum / n
 end
 
 -- Spec 030, R2: objetivo com mob médio mais de 1,5 nível acima do jogador.

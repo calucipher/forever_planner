@@ -235,7 +235,7 @@ end
 ------------------------------------------------------------------------------------------
 -- R5: preço na casa de leilões (API do leilão moderno; a conferir no jogo)
 ------------------------------------------------------------------------------------------
-local AH_MAX, AH_GAP = 10, 1.5
+local AH_MAX, AH_GAP = 20, 1.5 -- spec 061, R6: até 20 buscas (gear e venda)
 local queue, waiting = {}, nil
 
 local function prices() ns.FP.db.gearPrices = ns.FP.db.gearPrices or {}; return ns.FP.db.gearPrices end
@@ -253,14 +253,19 @@ local function nextSearch()
 end
 
 function GG.AuctionOpened()
+    if not _G.C_AuctionHouse then return end
     local r = state.result
-    if not (r and _G.C_AuctionHouse) then return end
     queue = {}
     local seen = {}
-    for _, a in ipairs(r.advice) do
+    for _, a in ipairs(r and r.advice or {}) do
         for _, c in ipairs({ a, a.alts[1], a.alts[2] }) do
             if c and c.boe and not seen[c.item] and #queue < AH_MAX then seen[c.item] = true; queue[#queue + 1] = c.item end
         end
+    end
+    -- spec 061, R6: itens da bolsa que dá para leiloar e materiais de desencanto
+    local ok, more = pcall(function() return ns.EconomyGuide and ns.EconomyGuide.WantedPrices() or {} end)
+    for _, id in ipairs(ok and more or {}) do
+        if not seen[id] and #queue < AH_MAX then seen[id] = true; queue[#queue + 1] = id end
     end
     if #queue > 0 then nextSearch() end
 end
@@ -275,11 +280,31 @@ function GG.AuctionResults(itemKey)
         for i = 1, n do
             local info = A.GetItemSearchResultInfo(A.MakeItemKey(item), i)
             local buy = info and info.buyoutAmount
+            -- spec 061, R6: preço por unidade (o leilão pode ser uma pilha)
+            if buy and buy > 0 then buy = buy / math.max(info.quantity or 1, 1) end
             if buy and buy > 0 and (not best or buy < best) then best = buy end
         end
         if best then prices()[item] = { copper = best, at = _G.time() } end
     end)
     if not ok then ns.FP.Debug("gear: preço da AH falhou: " .. tostring(err)) end
+    ns.FP.Fire("GEAR")
+end
+
+-- Spec 061, R6: material de desencanto é commodity (base 12.x): resultado e preço por unidade próprios.
+function GG.CommodityResults(itemID)
+    local A = _G.C_AuctionHouse
+    local item = tonumber(itemID) or waiting
+    if not (A and item and A.GetNumCommoditySearchResults) then return end
+    local ok, err = pcall(function()
+        local best
+        for i = 1, (A.GetNumCommoditySearchResults(item) or 0) do
+            local info = A.GetCommoditySearchResultInfo(item, i)
+            local unit = info and info.unitPrice
+            if unit and unit > 0 and (not best or unit < best) then best = unit end
+        end
+        if best then prices()[item] = { copper = best, at = _G.time() } end
+    end)
+    if not ok then ns.FP.Debug("venda: preço de commodity falhou: " .. tostring(err)) end
     ns.FP.Fire("GEAR")
 end
 
