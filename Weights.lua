@@ -3,6 +3,7 @@
 -- prioridades publicadas (Icy Veins, Warcraft Tavern, Mobalytics, Maxroll) e dos pesos
 -- clássicos de caster. Calibre com dummy / tempo de kill real e ajuste na aba Builds.
 local _, ns = ...
+local K = ns.Locale.K -- spec 066
 local Weights = {}
 ns.Weights = Weights
 
@@ -27,9 +28,9 @@ Weights.presets = {
 }
 
 Weights.statLabels = {
-    sp = "Spell Power", shadow = "Dano de Sombra", fire = "Dano de Fogo", sta = "Stamina",
-    int = "Intelecto", spi = "Espírito", crit = "Crit", hit = "Hit", haste = "Haste",
-    dps = "DPS (varinha)",
+    sp = "Spell Power", shadow = K("Dano de Sombra"), fire = K("Dano de Fogo"), sta = "Stamina",
+    int = K("Intelecto"), spi = K("Espírito"), crit = "Crit", hit = "Hit", haste = "Haste",
+    dps = K("DPS (varinha)"),
 }
 Weights.order = { "sp", "shadow", "fire", "sta", "int", "spi", "crit", "hit", "haste", "dps" }
 

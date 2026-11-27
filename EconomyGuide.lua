@@ -1,6 +1,7 @@
 -- EconomyGuide.lua: adaptador da spec 061 (vender, leiloar ou desencantar). Lê as bolsas, o preço
 -- da AH guardado pela spec 048 (GearGuide.Price), o Enchanting e põe a linha no tooltip.
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local Util = ns.Util
 local EG = {}
 ns.EconomyGuide = EG
@@ -8,7 +9,7 @@ ns.EconomyGuide = EG
 local PRICE_DAYS = 7          -- R6: preço da AH vale por 7 dias
 local QUEST, WEAPON, ARMOR = 12, 2, 4
 local ENCHANTING = 333
-local LABEL = { vendedor = "vendedor", leilao = "leilão", desencantar = "desencantar", guardar = "guardar" }
+local LABEL = { vendedor = K("vendedor"), leilao = K("leilão"), desencantar = K("desencantar"), guardar = K("guardar") }
 
 local function info(id)
     local I = _G.C_Item and _G.C_Item.GetItemInfo or _G.GetItemInfo
@@ -132,12 +133,12 @@ local function tooltipLine(tt, id)
     local r = evalCache[key]
     if r == nil then r = EG.Evaluate(id, 1, bound) or false; evalCache[key] = r end
     r = r or nil
-    if not r or r.use == "guardar" and r.vendor == 0 then return end
+    if not r or r.use == K("guardar") and r.vendor == 0 then return end
     local parts = {}
-    if r.use ~= "vendedor" and r.vendor > 0 then parts[#parts + 1] = "vendedor " .. money(r.vendor) end
-    if r.ah and r.use ~= "leilao" then parts[#parts + 1] = "leilão ~" .. money(r.ah) end
-    if r.de and r.canDE and r.use ~= "desencantar" then parts[#parts + 1] = "desencantar ~" .. money(r.de) end
-    local head = r.use == "guardar" and "Guardar" or ("Melhor: " .. LABEL[r.use] .. " " .. (r.use == "vendedor" and "" or "~") .. money(r.value))
+    if r.use ~= K("vendedor") and r.vendor > 0 then parts[#parts + 1] = L["vendedor "] .. money(r.vendor) end
+    if r.ah and r.use ~= "leilao" then parts[#parts + 1] = L["leilão ~"] .. money(r.ah) end
+    if r.de and r.canDE and r.use ~= K("desencantar") then parts[#parts + 1] = L["desencantar ~"] .. money(r.de) end
+    local head = r.use == K("guardar") and L["Guardar"] or (L["Melhor: "] .. L[LABEL[r.use]] .. " " .. (r.use == K("vendedor") and "" or "~") .. money(r.value))
     local text = head .. (#parts > 0 and (" (" .. table.concat(parts, " · ") .. ")") or "")
     tt:AddLine("|cFFB38CFF" .. text .. "|r")
     if r.tradeable and not r.ah then tt:AddLine("|cFF888888leilão: abra a AH para o addon ver o preço|r") end
@@ -165,7 +166,7 @@ ns.FP.On("READY", hookTooltip)
 
 -- R8: /fp venda
 function EG.Print()
-    local groups, totals, order = {}, {}, { "leilao", "desencantar", "vendedor", "guardar" }
+    local groups, totals, order = {}, {}, { "leilao", K("desencantar"), K("vendedor"), K("guardar") }
     local seen = {}
     for _, b in ipairs(bagItems()) do
         local key = b.id .. (b.bound and "b" or "")
@@ -176,7 +177,7 @@ function EG.Print()
     end
     for _, s in pairs(seen) do
         local r = EG.Evaluate(s.id, s.count, s.bound)
-        if r and not (r.use == "guardar" and r.vendor == 0 and not r.ah) then
+        if r and not (r.use == K("guardar") and r.vendor == 0 and not r.ah) then
             groups[r.use] = groups[r.use] or {}
             table.insert(groups[r.use], r)
             totals[r.use] = (totals[r.use] or 0) + (r.value or 0)
@@ -187,14 +188,14 @@ function EG.Print()
         local g = groups[use]
         if g then
             any = true
-            ns.FP.Print(string.format("|cFFB38CFF%s|r (%d, ~%s):", LABEL[use], #g, money(totals[use])))
+            ns.FP.Print(string.format("|cFFB38CFF%s|r (%d, ~%s):", L[LABEL[use]], #g, money(totals[use])))
             for _, r in ipairs(g) do
                 ns.FP.Print(string.format("  %s%s %s", r.item.link or r.item.name, r.count > 1 and (" x" .. r.count) or "",
-                    use == "guardar" and "" or ("~" .. money(r.value))))
+                    use == K("guardar") and "" or ("~" .. money(r.value))))
             end
         end
     end
-    if not any then ns.FP.Print("nada nas bolsas para vender.") end
+    if not any then ns.FP.Print(L["nada nas bolsas para vender."]) end
     if EG.EnchantingSkill() == 0 then ns.FP.Print("|cFF888888sem Enchanting: desencantar não entra na conta.|r") end
 end
 

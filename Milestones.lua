@@ -1,6 +1,7 @@
 -- Milestones.lua: regras puras dos marcos da classe (spec 011). Sem API do WoW: tudo chega
 -- por parâmetro (conteúdo da classe, função que diz se um feitiço é conhecido, distância).
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local Milestones = {}
 ns.Milestones = Milestones
 
@@ -75,9 +76,9 @@ end
 
 -- Spec 020, R4: aviso quando não há transporte para o treinador em outro continente.
 function Milestones.NoGateText(weaponName, places, routesLoaded)
-    local cause = routesLoaded and "Onde você está não há nenhum zepelim ou barco para outro continente"
-        or "A tabela de rotas não carregou: reabra o jogo (/reload não carrega arquivo novo)"
-    return string.format("|cFFFFAA00%s só tem treinador em outro continente:|r %s. %s; viaje até lá.", weaponName, places, cause)
+    local cause = routesLoaded and L["Onde você está não há nenhum zepelim ou barco para outro continente"]
+        or L["A tabela de rotas não carregou: reabra o jogo (/reload não carrega arquivo novo)"]
+    return string.format(L["|cFFFFAA00%s só tem treinador em outro continente:|r %s. %s; viaje até lá."], L[weaponName], places, cause)
 end
 
 -- Spec 016: "Hanashi (Orgrimmar, Valley of Honor)" -> "Orgrimmar, Valley of Honor".
@@ -187,11 +188,11 @@ function Milestones.FormatSpells(list, max)
     local parts = {}
     for i = 1, math.min(#list, max) do
         local s = list[i]
-        local tag = s.new and ", novo do Forever" or (s.rank and ", rank novo" or "") -- spec 051, R3
+        local tag = s.new and L[", novo do Forever"] or (s.rank and L[", rank novo"] or "") -- spec 051, R3
         parts[#parts + 1] = string.format("%s (%d%s)", s.name, s.lvl, tag)
     end
     local text = table.concat(parts, ", ")
-    if #list > max then text = text .. " e mais " .. (#list - max) end
+    if #list > max then text = text .. L[" e mais "] .. (#list - max) end
     return text
 end
 
@@ -237,7 +238,7 @@ end
 
 -- R2: disponível e no log ficam; das que não liberaram, só começo de cadeia em até `window` níveis.
 local DEFAULT_WINDOW = 10
-local function isOpen(e) return e.status == "disponível" or e.status == "no log" end
+local function isOpen(e) return e.status == K("disponível") or e.status == K("no log") end
 
 function Milestones.VisibleClassList(entries, level, window)
     local out = {}
@@ -261,7 +262,7 @@ function Milestones.DedupeByName(entries, dist)
             order[#order + 1] = key
         else
             -- a do log tem prioridade; entre iguais, a de quest giver mais perto
-            local inLog, curInLog = e.status == "no log", cur.e.status == "no log"
+            local inLog, curInLog = e.status == K("no log"), cur.e.status == K("no log")
             if (inLog and not curInLog)
                 or (inLog == curInLog and d and (cur.d == nil or d < cur.d)) then
                 bestByName[key] = { e = e, d = d }
@@ -277,7 +278,7 @@ end
 function Milestones.UnlockedNow(entries, level)
     local out = {}
     for _, e in ipairs(entries) do
-        if e.status == "disponível" and e.req == level then out[#out + 1] = e end
+        if e.status == K("disponível") and e.req == level then out[#out + 1] = e end
     end
     return out
 end

@@ -2,18 +2,19 @@
 -- jogo (quest, cadeia, masmorra, vendedor, AH) em corrotina, fora de combate, e entrega para a
 -- regra pura (Gear.Advice). Só ele lê a QuestieDB por Data.lua e a API de item.
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local GG = {}
 ns.GearGuide = GG
 
 -- Slot de equipamento (equipLoc do jogo) > nome na aba. Arma de duas mãos e de uma mão concorrem.
 GG.SLOTS = {
-    INVTYPE_HEAD = "Cabeça", INVTYPE_NECK = "Pescoço", INVTYPE_SHOULDER = "Ombros", INVTYPE_CLOAK = "Capa",
-    INVTYPE_CHEST = "Peito", INVTYPE_ROBE = "Peito", INVTYPE_WRIST = "Pulsos", INVTYPE_HAND = "Mãos",
-    INVTYPE_WAIST = "Cintura", INVTYPE_LEGS = "Pernas", INVTYPE_FEET = "Pés", INVTYPE_FINGER = "Anel",
-    INVTYPE_TRINKET = "Berloque", INVTYPE_WEAPON = "Arma", INVTYPE_2HWEAPON = "Arma",
-    INVTYPE_WEAPONMAINHAND = "Arma", INVTYPE_WEAPONOFFHAND = "Mão secundária", INVTYPE_SHIELD = "Mão secundária",
-    INVTYPE_HOLDABLE = "Mão secundária", INVTYPE_RANGED = "À distância", INVTYPE_RANGEDRIGHT = "À distância",
-    INVTYPE_THROWN = "À distância",
+    INVTYPE_HEAD = K("Cabeça"), INVTYPE_NECK = K("Pescoço"), INVTYPE_SHOULDER = K("Ombros"), INVTYPE_CLOAK = K("Capa"),
+    INVTYPE_CHEST = K("Peito"), INVTYPE_ROBE = K("Peito"), INVTYPE_WRIST = K("Pulsos"), INVTYPE_HAND = K("Mãos"),
+    INVTYPE_WAIST = K("Cintura"), INVTYPE_LEGS = K("Pernas"), INVTYPE_FEET = K("Pés"), INVTYPE_FINGER = K("Anel"),
+    INVTYPE_TRINKET = K("Berloque"), INVTYPE_WEAPON = K("Arma"), INVTYPE_2HWEAPON = K("Arma"),
+    INVTYPE_WEAPONMAINHAND = K("Arma"), INVTYPE_WEAPONOFFHAND = K("Mão secundária"), INVTYPE_SHIELD = K("Mão secundária"),
+    INVTYPE_HOLDABLE = K("Mão secundária"), INVTYPE_RANGED = K("À distância"), INVTYPE_RANGEDRIGHT = K("À distância"),
+    INVTYPE_THROWN = K("À distância"),
 }
 local WEAPON, ARMOR = 2, 4
 local MAX_BOSS_NPCS = 2 -- item que cai de até 2 NPCs = loot de chefe (R1)
@@ -24,7 +25,7 @@ local state = { result = nil, dirty = true, loading = 0, retries = 0 }
 function GG.Result() return state.result end
 
 -- R1 (cadeia): primeira quest não feita da cadeia que leva a q, e quantos passos até q.
-local function chainEntry(q, L, depth)
+local function chainEntry(q, lvl, depth)
     local D = ns.Data
     depth = depth or 1
     if depth > CHAIN_DEPTH then return nil end
@@ -33,8 +34,8 @@ local function chainEntry(q, L, depth)
     for _, p in ipairs(D.Q.preQuestSingle(q) or {}) do pres[#pres + 1] = p end
     for _, p in ipairs(pres) do
         if not D.IsCompleted(p) then
-            if D.IsEligible(p, L) then return p, depth + 1 end
-            local e, n = chainEntry(p, L, depth + 1)
+            if D.IsEligible(p, lvl) then return p, depth + 1 end
+            local e, n = chainEntry(p, lvl, depth + 1)
             if e then return e, n end
         end
     end
@@ -42,13 +43,13 @@ local function chainEntry(q, L, depth)
 end
 
 -- R1 (masmorra): áreas das masmorras cuja faixa da LFG cruza L..L+ahead.
-local function dungeonAreas(L, ahead)
+local function dungeonAreas(lvl, ahead)
     local D, out = ns.Data, {}
     local byName = {}
     for _, d in ipairs(ns.DungeonGuide.List() or {}) do
         local a = d.best or d.act
         local lo, hi = a and (a.minLevelSuggestion or a.minLevel), a and a.maxLevelSuggestion
-        if lo and hi and lo <= L + ahead and hi >= L then byName[(d.name or ""):lower()] = d end
+        if lo and hi and lo <= lvl + ahead and hi >= lvl then byName[(d.name or ""):lower()] = d end
     end
     for area, e in pairs(D.dungeons or {}) do
         local d = byName[tostring(e[1] or ""):lower()]
@@ -103,23 +104,23 @@ local function forMe(q)
 end
 
 -- R1, R2: candidatos. yield a cada 300 itens. Devolve a lista e quantos itens ainda carregam.
-local function candidates(L, yield)
+local function candidates(lvl, yield)
     local D, G = ns.Data, ns.Gear
     local ahead = G.AHEAD
-    local areas = dungeonAreas(L, ahead)
+    local areas = dungeonAreas(lvl, ahead)
     local faction = _G.UnitFactionGroup("player")
     local out, loading = {}, 0
     for i, item in ipairs(D.I.GetAllIds()) do
         local cls = D.I.class(item)
         local req, exact
         if cls == WEAPON or cls == ARMOR then req, exact = reqLevel(item) end
-        if req and req <= L + ahead and req >= L - 10 then
+        if req and req <= lvl + ahead and req >= lvl - 10 then
             local sources = {}
             for _, q in ipairs(D.I.questRewards(item) or {}) do
-                if D.IsEligible(q, L + ahead) then
+                if D.IsEligible(q, lvl + ahead) then
                     sources[#sources + 1] = { source = "quest", quest = q }
                 elseif not D.IsCompleted(q) and forMe(q) then
-                    local entry, steps = chainEntry(q, L + ahead)
+                    local entry, steps = chainEntry(q, lvl + ahead)
                     if entry then sources[#sources + 1] = { source = "cadeia", quest = q, entry = entry, steps = steps } end
                 end
             end
@@ -128,7 +129,7 @@ local function candidates(L, yield)
             local vendor = friendlyVendor(item, faction)
             if vendor then sources[#sources + 1] = { source = "vendedor", npc = vendor } end
             if #sources > 0 then req = refineReq(item, req, exact) end
-            if #sources > 0 and req <= L + ahead then
+            if #sources > 0 and req <= lvl + ahead then
                 local _, _, _, equipLoc = C_Item.GetItemInfoInstant(item)
                 local slot = GG.SLOTS[equipLoc or ""]
                 local delta, why = ns.Scoring.UpgradeDelta(item)
@@ -160,14 +161,14 @@ function GG.Refresh(force)
     local D = ns.Data
     if not (D.Q and D.ready and D.I) then return end
     if not (force or state.dirty) then return end
-    local L = UnitLevel("player")
+    local lvl = UnitLevel("player")
     local started = ns.FP.RunCoroutine("gear", function(yield)
-        local cands, loading = candidates(L, yield)
-        return { level = L, advice = ns.Gear.Advice(cands, L), loading = loading }
+        local cands, loading = candidates(lvl, yield)
+        return { level = lvl, advice = ns.Gear.Advice(cands, lvl), loading = loading }
     end, function(ok, res)
         if not ok then
             ns.FP.Debug("gear: falhou: " .. tostring(res))
-            state.result = { level = L, advice = {}, error = tostring(res) }
+            state.result = { level = lvl, advice = {}, error = tostring(res) }
         else
             state.result = res
             state.dirty = false
@@ -199,36 +200,36 @@ function GG.Go(a)
             or D.NpcsBySubName("Auctioneer", (_G.UnitFactionGroup("player")))
         local from = ns.Planner.PlayerPoint()
         local p = from and ns.Planner.Nearest(from, pts) or pts[1]
-        if not p then ns.FP.Print("não achei onde fica: " .. (a.source == "ah" and "leiloeiro" or "vendedor")); return end
+        if not p then ns.FP.Print(L["não achei onde fica: "] .. (a.source == "ah" and "leiloeiro" or "vendedor")); return end
         ns.Gps.SetTarget(p.mapID, p.x, p.y, (a.source == "ah" and "Leiloeiro" or "Vendedor") .. ": " .. tostring(GG.ItemName(a.item)))
     end
 end
 
 function GG.ItemName(item)
-    return C_Item.GetItemInfo(item) or ns.Data.I.name(item) or ("item " .. item)
+    return C_Item.GetItemInfo(item) or ns.Data.I.name(item) or (L["item "] .. item)
 end
 
 -- R4: "de onde vem" em texto curto.
 function GG.SourceText(a)
     local D = ns.Data
-    if a.source == "quest" then return "quest " .. (D.Q.name(a.quest) or a.quest)
+    if a.source == "quest" then return L["quest "] .. (D.Q.name(a.quest) or a.quest)
     elseif a.source == "cadeia" then
-        return string.format("cadeia: %s → %s (%d passos)", D.Q.name(a.entry) or a.entry, D.Q.name(a.quest) or a.quest, a.steps or 1)
+        return string.format(L["cadeia: %s → %s (%d passos)"], D.Q.name(a.entry) or a.entry, D.Q.name(a.quest) or a.quest, a.steps or 1)
     elseif a.source == "masmorra" then
-        return "masmorra " .. tostring(a.dungeon and a.dungeon.name) .. (a.npc and (" (" .. tostring(D.N.name(a.npc)) .. ")") or "")
-    elseif a.source == "vendedor" then return "vendedor " .. tostring(D.N.name(a.npc))
-    else return "AH (BoE)" end
+        return L["masmorra "] .. tostring(a.dungeon and a.dungeon.name) .. (a.npc and (" (" .. tostring(D.N.name(a.npc)) .. ")") or "")
+    elseif a.source == "vendedor" then return L["vendedor "] .. tostring(D.N.name(a.npc))
+    else return L["AH (BoE)"] end
 end
 
 -- R7: no chat.
 function GG.Print()
     local r = state.result
-    if not r then ns.FP.Print("gear: calculando; tente de novo em alguns segundos."); GG.Refresh(true); return end
-    ns.FP.Print(string.format("gear no nível %d (estimativa, até %d níveis à frente):", r.level, ns.Gear.AHEAD))
-    if #r.advice == 0 then ns.FP.Print("  nenhum upgrade achado nas quests, cadeias, masmorras e vendedores.") end
+    if not r then ns.FP.Print(L["gear: calculando; tente de novo em alguns segundos."]); GG.Refresh(true); return end
+    ns.FP.Print(string.format(L["gear no nível %d (estimativa, até %d níveis à frente):"], r.level, ns.Gear.AHEAD))
+    if #r.advice == 0 then ns.FP.Print(L["  nenhum upgrade achado nas quests, cadeias, masmorras e vendedores."]) end
     for _, a in ipairs(r.advice) do
         ns.FP.Print(string.format("  %s: %s +%.1f · %s%s", a.slot, GG.ItemName(a.item), a.delta, GG.SourceText(a),
-            a.later and (" · no " .. a.later) or ""))
+            a.later and (L[" · no "] .. a.later) or ""))
     end
 end
 

@@ -1,5 +1,6 @@
 -- UI/BuildsTab.lua: builds de talento por nível, pesos de atributo editáveis, Legacy e dicas.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Theme, Weights = ns.Theme, ns.Weights
 
 local function build(panel)
@@ -15,9 +16,9 @@ local function build(panel)
         card:SetSize(170, 52); card:SetPoint("TOPLEFT", 0, -(i - 1) * 58)
         Theme.Backdrop(card, Theme.c.row)
         card.title = Theme.Text(card, 12, Theme.c.text); card.title:SetPoint("TOPLEFT", 8, -8)
-        card.title:SetText(b.title)
+        card.title:SetText(L[b.title])
         card.badge = Theme.Badge(card, 90); card.badge:SetPoint("BOTTOMLEFT", 8, 8)
-        card.badge:Set(b.tag, b.id == "affliction" and { 0.45, 0.9, 0.35 } or { 0.7, 0.55, 1 })
+        card.badge:Set(L[b.tag], b.id == "affliction" and { 0.45, 0.9, 0.35 } or { 0.7, 0.55, 1 })
         card:SetScript("OnClick", function() selected = b.id; api.Refresh() end)
         card.build = b
         buildButtons[i] = card
@@ -39,19 +40,19 @@ local function build(panel)
         stepLines[i] = { lvl = lvl, txt = txt }
     end
 
-    local usePreset = Theme.Button(c, "Usar pesos desta build", 170, 22, function()
+    local usePreset = Theme.Button(c, L["Usar pesos desta build"], 170, 22, function()
         ns.FP.db.preset = selected; ns.Scoring.ClearCache(); ns.FP.Fire("CHANGED"); api.Refresh()
-        ns.FP.Print("perfil de pesos:", selected)
+        ns.FP.Print(L["perfil de pesos:"], selected)
     end, "primary")
 
     -- Editor de pesos
     local wTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE")
-    wTitle:SetText("PESOS DE ATRIBUTO (heurísticos - ajuste à vontade)")
+    wTitle:SetText(L["PESOS DE ATRIBUTO (heurísticos - ajuste à vontade)"])
     local weightRows = {}
     for i, key in ipairs(Weights.order) do
         local r = CreateFrame("Frame", nil, c)
         r:SetSize(180, 20)
-        r.label = Theme.Text(r, 11, Theme.c.text); r.label:SetPoint("LEFT"); r.label:SetText(Weights.statLabels[key])
+        r.label = Theme.Text(r, 11, Theme.c.text); r.label:SetPoint("LEFT"); r.label:SetText(L[Weights.statLabels[key]])
         r.value = Theme.Text(r, 11, Theme.c.gold); r.value:SetPoint("LEFT", 100, 0)
         local function bump(d)
             local db = ns.FP.db
@@ -64,33 +65,33 @@ local function build(panel)
         r.key = key
         weightRows[i] = r
     end
-    local reset = Theme.Button(c, "Zerar ajustes", 110, 20, function()
+    local reset = Theme.Button(c, L["Zerar ajustes"], 110, 20, function()
         wipe(ns.FP.db.customWeights); ns.Scoring.ClearCache(); ns.FP.Fire("CHANGED"); api.Refresh()
     end)
 
-    local legacyTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE"); legacyTitle:SetText(ns.Builds.legacy.title:upper())
+    local legacyTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE"); legacyTitle:SetText(L[ns.Builds.legacy.title]:upper())
     local legacyLines = {}
     for i, item in ipairs(ns.Builds.legacy.items) do
         local t = Theme.Text(c, 11, Theme.c.text); t:SetWidth(380); t:SetWordWrap(true)
-        t:SetText("|cFF73E65A" .. item.text .. "|r  ·  " .. item.note)
+        t:SetText("|cFF73E65A" .. L[item.text] .. "|r  ·  " .. L[item.note])
         legacyLines[i] = t
     end
     -- Marcos da classe (spec 011, R7): os marcos de níveis já passados ficam esmaecidos.
     local _, myClass = UnitClass("player")
     local classDef = ns.Classes and ns.Classes[myClass]
-    local marksTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE"); marksTitle:SetText("MARCOS DA CLASSE")
+    local marksTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE"); marksTitle:SetText(L["MARCOS DA CLASSE"])
     local markLines = {}
     for i, m in ipairs(classDef and classDef.milestones or {}) do
         local lvl = Theme.Text(c, 11, Theme.c.gold); lvl:SetWidth(48); lvl:SetText(tostring(m.lvl))
         local txt = Theme.Text(c, 11, Theme.c.text); txt:SetWidth(330); txt:SetWordWrap(true); txt:SetJustifyV("TOP")
-        txt:SetText(m.text)
+        txt:SetText(L[m.text])
         markLines[i] = { lvl = lvl, txt = txt, m = m }
     end
-    local tipsTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE"); tipsTitle:SetText("DICAS DE LEVELING")
+    local tipsTitle = Theme.Text(c, 13, Theme.c.accent, "OUTLINE"); tipsTitle:SetText(L["DICAS DE LEVELING"])
     local tipLines = {}
     for i, tip in ipairs(ns.Builds.tips) do
         local t = Theme.Text(c, 11, Theme.c.text); t:SetWidth(380); t:SetWordWrap(true); t:SetJustifyV("TOP")
-        t:SetText("- " .. tip)
+        t:SetText("- " .. L[tip])
         tipLines[i] = t
     end
 
@@ -102,7 +103,7 @@ local function build(panel)
             line.lvl:ClearAllPoints(); line.txt:ClearAllPoints()
             if s then
                 line.lvl:SetPoint("TOPLEFT", 4, -y); line.txt:SetPoint("TOPLEFT", 56, -y)
-                line.lvl:SetText(s.lvl); line.txt:SetText(s.text)
+                line.lvl:SetText(s.lvl); line.txt:SetText(L[s.text])
                 line.lvl:Show(); line.txt:Show()
                 y = y + 18
             else
@@ -150,9 +151,9 @@ local function build(panel)
         end
         b = b or ns.Builds.list[1]
         local active = db.preset == b.preset
-        title:SetText(b.title .. (active and "  |cFF73E65A(pesos ativos)|r" or ""))
-        summary:SetText(b.summary)
-        usePreset.label:SetText(active and "Pesos ativos" or "Usar pesos desta build")
+        title:SetText(L[b.title] .. (active and ("  |cFF73E65A" .. L["(pesos ativos)"] .. "|r") or ""))
+        summary:SetText(L[b.summary])
+        usePreset.label:SetText(active and L["Pesos ativos"] or L["Usar pesos desta build"])
         local w = Weights.Get(db.preset, db.customWeights, UnitLevel("player"))
         for _, r in ipairs(weightRows) do
             local custom = db.customWeights[r.key] ~= nil

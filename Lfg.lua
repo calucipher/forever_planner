@@ -1,6 +1,7 @@
 -- Lfg.lua: regras puras do painel de procurar grupo (spec 037). Sem API do jogo nem db: tudo chega
 -- por parâmetro. O adaptador é UI/LfgPanel.lua.
 local _, ns = ...
+local K = ns and ns.Locale and ns.Locale.K or function(s) return s end -- spec 066
 ns = ns or {}
 local Lfg = {}
 ns.Lfg = Lfg
@@ -23,11 +24,11 @@ function Lfg.Message(tpl, p)
 end
 
 -- R2: 0 dentro da faixa sugerida; positivo se a atividade é alta demais; negativo se é baixa.
-function Lfg.Fit(act, L)
+function Lfg.Fit(act, lvl)
     local lo, hi = act.minLevelSuggestion or 0, act.maxLevelSuggestion
     if not hi or hi == 0 then return nil end
-    if L < lo then return lo - L end
-    if L > hi then return hi - L end
+    if lvl < lo then return lo - lvl end
+    if lvl > hi then return hi - lvl end
     return 0
 end
 
@@ -40,10 +41,10 @@ local function fitRank(fit)
 end
 
 -- R3: atividade de melhor Fit; empate por orderIndex e depois pela ordem da lista.
-function Lfg.BestActivity(acts, L)
+function Lfg.BestActivity(acts, lvl)
     local best, bc, bd, bo
     for _, a in ipairs(acts or {}) do
-        local c, d = fitRank(Lfg.Fit(a, L))
+        local c, d = fitRank(Lfg.Fit(a, lvl))
         local o = a.orderIndex or math.huge
         if not best or c < bc or (c == bc and (d < bd or (d == bd and o < bo))) then
             best, bc, bd, bo = a, c, d, o
@@ -53,22 +54,22 @@ function Lfg.BestActivity(acts, L)
 end
 
 -- R4: a linha pode receber "Chamar"?
-function Lfg.CanCall(row, L)
+function Lfg.CanCall(row, lvl)
     if not row.leaderName or row.isDelisted or row.hasSelf then return false end
-    local a = Lfg.BestActivity(row.acts, L)
+    local a = Lfg.BestActivity(row.acts, lvl)
     if not a then return false end -- sem atividade conhecida, o texto sairia sem ela
     if a.maxNumPlayers and a.maxNumPlayers > 0 and (row.numMembers or 0) >= a.maxNumPlayers then return false end
-    if a.minLevel and L < a.minLevel then return false end
+    if a.minLevel and lvl < a.minLevel then return false end
     return true
 end
 
 -- R5: grupos antes de sozinhos; depois Fit, não chamado, anúncio mais novo e searchResultID.
-function Lfg.Sort(rows, L, calls)
+function Lfg.Sort(rows, lvl, calls)
     local keyed = {}
     for _, r in ipairs(rows) do
         if not r.hasSelf then
-            local a = Lfg.BestActivity(r.acts, L)
-            local c, d = fitRank(a and Lfg.Fit(a, L))
+            local a = Lfg.BestActivity(r.acts, lvl)
+            local c, d = fitRank(a and Lfg.Fit(a, lvl))
             keyed[#keyed + 1] = { r = r, solo = (r.numMembers or 0) <= 1 and 1 or 0, c = c, d = d,
                 called = calls and r.key and calls[r.key] and 1 or 0, age = r.age or 0, id = r.searchResultID or 0 }
         end
@@ -105,7 +106,7 @@ function Lfg.Status(calls, key, now, ttl)
     local t = calls[key]
     if not t then return nil end
     local age = now - t
-    return { state = age > ttl and "sem resposta" or "chamado", age = age }
+    return { state = age > ttl and K("sem resposta") or K("chamado"), age = age }
 end
 
 -- R7: dá para ler a lista e chamar agora?

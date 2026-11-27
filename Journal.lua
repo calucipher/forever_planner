@@ -3,6 +3,7 @@
 -- tools/journal.py importa o diário numa base SQLite. Nada é calculado em combate: só anota a linha.
 -- Privacidade: sem nome de personagem, conta, reino ou outro jogador; o personagem é Util.CharKey.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Util = ns.Util
 local Journal = {}
 ns.Journal = Journal
@@ -266,6 +267,7 @@ ns.FP.On("KILL_XP", function(xp, name)
     local id = (look and look.id) or (name and idByName(name))
     local ttk = look and round(now - look.at, 1)
     if tick then tick.activeAt = now end
+    ns.FP.Fire("KILL_TIME", ttk, id and levelById[id]) -- spec 067, R6: calibra mesmo com o diário desligado
     Journal.Add("kill", id, id and levelById[id], ttk, tonumber(xp))
     -- Vários mobs com o mesmo nome (AoE, pet): o próximo conta desde esta morte, com o mesmo ID.
     if look then look.at = now end
@@ -423,15 +425,15 @@ function Journal.Command(arg)
     arg = (arg or ""):lower()
     if arg == "off" or arg == "on" then
         J.on = arg == "on"
-        ns.FP.Print("diário " .. (J.on and "ligado." or "desligado."))
+        ns.FP.Print(L["diário "] .. (J.on and L["ligado"] or L["desligado"]) .. ".")
         return
     end
     if arg == "limpar" then
         if _G.StaticPopupDialogs and _G.StaticPopup_Show then
             _G.StaticPopupDialogs.FOREVERPLANNER_JOURNAL_CLEAR = _G.StaticPopupDialogs.FOREVERPLANNER_JOURNAL_CLEAR or {
-                text = "Apagar o diário do Forever Planner? Importe antes com tools/journal.py.",
-                button1 = _G.YES or "Sim", button2 = _G.NO or "Não", timeout = 0, whileDead = true, hideOnEscape = true,
-                OnAccept = function() Journal.Reset(); ns.FP.Print("diário apagado.") end,
+                text = L["Apagar o diário do Forever Planner? Importe antes com tools/journal.py."],
+                button1 = _G.YES or L["Sim"], button2 = _G.NO or L["Não"], timeout = 0, whileDead = true, hideOnEscape = true,
+                OnAccept = function() Journal.Reset(); ns.FP.Print(L["diário apagado."]) end,
             }
             _G.StaticPopup_Show("FOREVERPLANNER_JOURNAL_CLEAR")
         end
@@ -444,8 +446,8 @@ function Journal.Command(arg)
         parts[#parts + 1] = kind .. " " .. #list
     end
     table.sort(parts)
-    ns.FP.Print(string.format("diário %s: %d linhas%s", J.on and "ligado" or "desligado", total,
-        oldest and (", a mais velha de " .. (_G.date or os.date)("%d/%m/%Y %H:%M", oldest)) or ""))
+    ns.FP.Print(string.format(L["diário %s: %d linhas%s"], J.on and "ligado" or "desligado", total,
+        oldest and (L[", a mais velha de "] .. (_G.date or os.date)("%d/%m/%Y %H:%M", oldest)) or ""))
     if #parts > 0 then ns.FP.Print(table.concat(parts, " · ")) end
 end
 

@@ -1,6 +1,7 @@
 -- UI/ToolsTab.lua: aba Ferramentas (spec 040). Um botão para cada comando do registro
 -- (Commands.lua), por seção, e a resposta do comando na área de resultado à direita.
 local _, ns = ...
+local L = ns.L -- spec 066: rótulo e dica do registro (K) traduzidos na hora
 local Theme = ns.Theme
 
 local LEFT_W, BTN_W, BTN_H, GAP = 330, 158, 22, 4
@@ -26,7 +27,7 @@ local function build(panel)
     local box = Theme.Panel(panel, Theme.c.panel)
     box:SetPoint("TOPLEFT", LEFT_W + 10, -2); box:SetPoint("BOTTOMRIGHT", 0, 0)
     local head = Theme.Text(box, 12, Theme.c.accent)
-    head:SetPoint("TOPLEFT", 8, -8); head:SetText("Resultado")
+    head:SetPoint("TOPLEFT", 8, -8); head:SetText(L["Resultado"])
     local out = Theme.ScrollArea(box)
     out:SetPoint("TOPLEFT", 8, -28); out:SetPoint("BOTTOMRIGHT", -8, 8)
     local text = Theme.Text(out.child, 11, Theme.c.text)
@@ -44,7 +45,7 @@ local function build(panel)
     end
 
     local function show(cmd, lines)
-        head:SetText(cmd.label)
+        head:SetText(L[cmd.label])
         text:SetText(#lines > 0 and table.concat(lines, "\n") or pending(cmd))
         out.child:SetHeight(text:GetStringHeight() + 10)
         out:SetVerticalScroll(0)
@@ -54,7 +55,7 @@ local function build(panel)
         for _, t in ipairs(toggles) do
             local okS, on = pcall(t.cmd.state)
             on = okS and on
-            t.btn.label:SetText(t.cmd.label .. ": " .. (on and "|cFF73E65Aligado|r" or "|cFF888888desligado|r"))
+            t.btn.label:SetText(L[t.cmd.label] .. ": " .. (on and ("|cFF73E65A" .. L["ligado"] .. "|r") or ("|cFF888888" .. L["desligado"] .. "|r")))
         end
         for _, v in ipairs(values) do
             local okV, cur = pcall(v.cmd.value or function() end)
@@ -75,14 +76,14 @@ local function build(panel)
     local y = 0
     for _, section in ipairs(ns.Commands.sections) do
         local title = Theme.Text(list.child, 12, Theme.c.accent)
-        title:SetPoint("TOPLEFT", 2, -y - 4); title:SetText(section)
+        title:SetPoint("TOPLEFT", 2, -y - 4); title:SetText(L[section])
         y = y + 22
         local col = 0
         for _, cmd in ipairs(ns.Commands.list) do
             if cmd.section == section and cmd.kind ~= "valor" then
-                local b = Theme.Button(list.child, cmd.label, BTN_W, BTN_H, function() run(cmd, nil) end)
+                local b = Theme.Button(list.child, L[cmd.label], BTN_W, BTN_H, function() run(cmd, nil) end)
                 b:SetPoint("TOPLEFT", col * (BTN_W + GAP), -y)
-                tooltip(b, cmd.tip .. "\n|cFF888888/fp " .. cmd.id .. "|r")
+                tooltip(b, L[cmd.tip] .. "\n|cFF888888/fp " .. cmd.id .. "|r")
                 if cmd.kind == "liga" then toggles[#toggles + 1] = { cmd = cmd, btn = b } end
                 col = col + 1
                 if col == 2 then col = 0; y = y + BTN_H + GAP end
@@ -92,12 +93,12 @@ local function build(panel)
         for _, cmd in ipairs(ns.Commands.list) do
             if cmd.section == section and cmd.kind == "valor" then
                 local label = Theme.Text(list.child, 11, Theme.c.text)
-                label:SetPoint("TOPLEFT", 2, -y - 4); label:SetWidth(130); label:SetText(cmd.label)
+                label:SetPoint("TOPLEFT", 2, -y - 4); label:SetWidth(130); label:SetText(L[cmd.label])
                 local v = { cmd = cmd }
                 if cmd.input == "opcoes" then
                     v.btn = Theme.Button(list.child, "", 180, BTN_H, function() run(cmd, nil) end)
                     v.btn:SetPoint("TOPLEFT", 136, -y)
-                    tooltip(v.btn, cmd.tip .. " (clique troca)\n|cFF888888/fp " .. cmd.id .. " " .. (cmd.arg or "") .. "|r")
+                    tooltip(v.btn, L[cmd.tip] .. L[" (clique troca)"] .. "\n|cFF888888/fp " .. cmd.id .. " " .. (cmd.arg or "") .. "|r")
                 else
                     local edit = CreateFrame("EditBox", nil, list.child, "InputBoxTemplate")
                     edit:SetSize(cmd.input == "texto" and 118 or 60, 20); edit:SetAutoFocus(false)
@@ -105,8 +106,8 @@ local function build(panel)
                     edit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); run(cmd, self:GetText()) end)
                     edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
                     if cmd.id == "stats" then linkBox = edit end
-                    tooltip(edit, cmd.tip .. "\n|cFF888888/fp " .. cmd.id .. " " .. (cmd.arg or "") .. "|r")
-                    local apply = Theme.Button(list.child, "Aplicar", 54, BTN_H, function()
+                    tooltip(edit, L[cmd.tip] .. "\n|cFF888888/fp " .. cmd.id .. " " .. (cmd.arg or "") .. "|r")
+                    local apply = Theme.Button(list.child, L["Aplicar"], 54, BTN_H, function()
                         edit:ClearFocus(); run(cmd, edit:GetText())
                     end)
                     apply:SetPoint("LEFT", edit, "RIGHT", 4, 0)
@@ -122,9 +123,9 @@ local function build(panel)
 
     function api.Refresh()
         refreshStates()
-        ns.UI.SetStatus("Ferramentas: cada botão é um comando /fp (passe o mouse para ver qual).")
+        ns.UI.SetStatus(L["Ferramentas: cada botão é um comando /fp (passe o mouse para ver qual)."])
     end
     return api
 end
 
-ns.UI.RegisterTab("tools", "Ferramentas", build)
+ns.UI.RegisterTab("tools", ns.Locale.K("Ferramentas"), build) -- spec 066

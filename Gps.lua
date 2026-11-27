@@ -1,6 +1,7 @@
 -- Gps.lua: aponta para onde ir. Usa o waypoint nativo (pino + super-track), o TomTom se
 -- estiver instalado, e uma seta própria na tela com distância.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Util = ns.Util
 local Gps = {}
 ns.Gps = Gps
@@ -188,11 +189,11 @@ end
 
 -- Spec 064, R3: custo de atravessar a zona pelo nível dela (spec 032) contra o do jogador.
 local function zoneCostFn()
-    local L = UnitLevel("player")
+    local lvl = UnitLevel("player")
     return function(zone)
         local ok, lo, hi = pcall(ns.Guide.ZoneLevels, zone)
         if not ok then lo, hi = nil, nil end
-        return ns.Gates.DangerCost(lo, hi, L)
+        return ns.Gates.DangerCost(lo, hi, lvl)
     end
 end
 Gps.ZoneCost = zoneCostFn
@@ -226,10 +227,10 @@ function Gps.UpdateGate()
             -- R4: o caminho ainda passa por zona bem acima do nível (não havia outro): avisa na seta
             t.danger = nil
             if ok and r then
-                local L = UnitLevel("player")
+                local lvl = UnitLevel("player")
                 for _, s in ipairs(r.gates) do
                     local okL, lo, hi = pcall(ns.Guide.ZoneLevels, s.to)
-                    if okL and lo and s.to ~= tz and ns.Gates.DangerCost(lo, hi, L) >= 10 then
+                    if okL and lo and s.to ~= tz and ns.Gates.DangerCost(lo, hi, lvl) >= 10 then
                         t.danger = string.format("%s (%s)", tostring(ns.Guide.AreaName(s.to)), ns.Zones.FormatRange(lo, hi))
                         break
                     end
@@ -259,22 +260,22 @@ end
 function Gps.PrintGates(arg)
     if arg == "limpar" then
         _G.ForeverPlannerWorld.gates = {}
-        ns.FP.Print("passagens aprendidas apagadas.")
+        ns.FP.Print(L["passagens aprendidas apagadas."])
         return
     end
     local cont = playerWorld()
     local pz = playerZone()
-    if not (cont and pz) then ns.FP.Print("não consegui ler a sua zona agora."); return end
+    if not (cont and pz) then ns.FP.Print(L["não consegui ler a sua zona agora."]); return end
     local G, n = ns.Guide, 0
     for _, g in ipairs(gateList(cont)) do
         if g.a == pz or g.b == pz then
             n = n + 1
             local other = g.a == pz and g.b or g.a
             ns.FP.Print(string.format("  %s · %s", G.AreaName(other),
-                g.learned and "aprendida no jogo" or (g.relevo and "pelo relevo (estimativa)" or "pela estrada (estimativa)")))
+                g.learned and L["aprendida no jogo"] or (g.relevo and L["pelo relevo (estimativa)"] or L["pela estrada (estimativa)"])))
         end
     end
-    if n == 0 then ns.FP.Print("nenhuma passagem conhecida em " .. tostring(G.AreaName(pz)) .. ".") end
+    if n == 0 then ns.FP.Print(L["nenhuma passagem conhecida em "] .. tostring(G.AreaName(pz)) .. ".") end
 end
 
 -- R2/R4: refaz o plano. Em voo, sem alvo no mundo ou em outro continente: sem trecho de voo.
@@ -565,12 +566,12 @@ function Gps.ShownTitle()
     local leg = Gps.leg
     if not leg then
         if Gps.gate then -- spec 049, R4; spec 064, R4: aviso de zona perigosa no caminho
-            return ns.Gates.Title(Gps.gate, ns.Guide.AreaName, t.title) .. (t.danger and (" · cuidado: " .. t.danger) or "")
+            return ns.Gates.Title(Gps.gate, ns.Guide.AreaName, t.title) .. (t.danger and (L[" · cuidado: "] .. t.danger) or "")
         end
         if Gps.door then return ns.Caves.Title(Gps.door, t.title) end -- spec 038, R6
         return t.title
     end
-    return string.format("Voar: %s > %s · depois: %s", tostring(leg.from.name), tostring(leg.to.name), tostring(t.title))
+    return string.format(L["Voar: %s > %s · depois: %s"], tostring(leg.from.name), tostring(leg.to.name), tostring(t.title))
 end
 
 ------------------------------------------------------------------------------------------
@@ -618,7 +619,7 @@ local function buildArrow()
     plusText:SetPoint("CENTER"); plusText:SetText("+")
     plus:SetScript("OnClick", function(self) ns.QuickMenu.Toggle(self) end)
     plus:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Recalcular rota · Ir entregar · Limpar o log"); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine(table.concat({ L["Recalcular rota"], L["Ir entregar"], L["Pular esta parada"], L["Ponto de voo"], L["Essenciais"], L["Parar GPS"] }, " · ")); GameTooltip:Show()
     end)
     plus:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
@@ -651,7 +652,7 @@ function Gps.UpdateArrow(f)
         return
     end
     f.tex:SetAlpha(1)
-    if cont ~= t.world[1] then f.dist:SetText("outro continente"); return end
+    if cont ~= t.world[1] then f.dist:SetText(L["outro continente"]); return end
     -- R3: a chegada é sempre no alvo final; a seta aponta para o ponto de voo se houver trecho.
     local _, dist = Gps.Relative(px, py, t.world[2], t.world[3], facing)
     local leg, door = Gps.leg, Gps.door
@@ -689,7 +690,7 @@ function Gps.UpdateArrow(f)
             ns.FP.Debug(string.format("gps: fora da estrada (%d yd)", off or -1))
         elseif left > 1 then
             aimX, aimY = aim.x, aim.y
-            distText = string.format("%d yd pela estrada", left)
+            distText = string.format(L["%d yd pela estrada"], left)
         end
     end
     -- Spec 050, R3/R4: sem estrada, o caminho pelo relevo; longe dele, descarta e o ticker refaz.
@@ -703,12 +704,12 @@ function Gps.UpdateArrow(f)
             ns.FP.Debug(string.format("gps: fora do caminho (%s)", okAim and tostring(off and math.floor(off)) or tostring(aim)))
         elseif left > 1 then
             aimX, aimY = aim.x, aim.y
-            distText = string.format("%d yd pelo caminho", left)
+            distText = string.format(L["%d yd pelo caminho"], left)
         end
     end
     local rel, aimDist = Gps.Relative(px, py, aimX, aimY, facing)
     f.tex:SetRotation(rel)
-    f.dist:SetText(distText or string.format(noPath and "%d yd (sem caminho a pé conhecido)" or "%d yd", aimDist))
+    f.dist:SetText(distText or string.format(noPath and L["%d yd (sem caminho a pé conhecido)"] or L["%d yd"], aimDist))
     if dist <= (ns.FP.db.gps.arriveYards or 12) and not t.arrived then
         t.arrived = true
         ns.FP.Debug(string.format("gps: chegou (%d yd) %s", dist, tostring(t.title)))

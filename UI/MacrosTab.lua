@@ -1,5 +1,6 @@
 -- UI/MacrosTab.lua: macros sugeridas, com criar/atualizar e caixa para copiar.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Theme = ns.Theme
 
 local CARD_H = 46
@@ -9,14 +10,14 @@ local function build(panel)
 
     local intro = Theme.Text(panel, 11, Theme.c.muted)
     intro:SetPoint("TOPLEFT", 2, -6)
-    intro:SetText("Feitas para repeat (alvo só em combate). Ao aprender um feitiço, as criadas se atualizam.")
+    intro:SetText(L["Feitas para repeat (alvo só em combate). Ao aprender um feitiço, as criadas se atualizam."])
 
     -- Caixa de visualização / cópia
     local preview = Theme.Panel(panel, { 0.03, 0.03, 0.05, 0.95 }, Theme.c.border)
     preview:SetPoint("BOTTOMLEFT", 0, 0); preview:SetPoint("BOTTOMRIGHT", 0, 0); preview:SetHeight(92)
     local pvTitle = Theme.Text(preview, 10, Theme.c.accent)
     pvTitle:SetPoint("TOPLEFT", 8, -6)
-    pvTitle:SetText("Selecione uma macro para ver o texto (Ctrl+C copia)")
+    pvTitle:SetText(L["Selecione uma macro para ver o texto (Ctrl+C copia)"])
     local edit = CreateFrame("EditBox", nil, preview)
     edit:SetMultiLine(true); edit:SetAutoFocus(false)
     edit:SetFont("Fonts\\ARIALN.TTF", 12, "")
@@ -31,7 +32,7 @@ local function build(panel)
     local y = 0
     for _, cat in ipairs(ns.Macros.categories) do
         local h = Theme.Text(child, 13, Theme.c.accent, "OUTLINE")
-        h:SetPoint("TOPLEFT", 2, -y - 4); h:SetText(cat:upper())
+        h:SetPoint("TOPLEFT", 2, -y - 4); h:SetText(L[cat]:upper())
         y = y + 24
         for _, m in ipairs(ns.Macros.list) do
             if m.cat == cat then
@@ -42,19 +43,19 @@ local function build(panel)
                 card.name:SetPoint("TOPLEFT", 10, -7)
                 card.desc = Theme.Text(card, 10, Theme.c.muted)
                 card.desc:SetPoint("TOPLEFT", card.name, "BOTTOMLEFT", 0, -4)
-                card.desc:SetWidth(380); card.desc:SetText(m.desc)
+                card.desc:SetWidth(380); card.desc:SetText(L[m.desc])
 
-                card.install = Theme.Button(card, "Criar", 70, 22, function()
+                card.install = Theme.Button(card, L["Criar"], 70, 22, function()
                     if ns.Macros.Install(m) then api.Refresh() end
                 end, "primary")
                 card.install:SetPoint("RIGHT", -8, 0)
-                local view = Theme.Button(card, "Ver", 46, 22, function()
+                local view = Theme.Button(card, L["Ver"], 46, 22, function()
                     local body, why = ns.Macros.Build(m)
                     if body then
-                        pvTitle:SetText(m.name .. "  ·  " .. #body .. "/255 caracteres")
+                        pvTitle:SetText(m.name .. "  ·  " .. #body .. L["/255 caracteres"])
                         edit:SetText(body); edit:SetFocus(); edit:HighlightText()
                     else
-                        pvTitle:SetText(m.name .. "  ·  indisponível")
+                        pvTitle:SetText(m.name .. L["  ·  indisponível"])
                         edit:SetText(ns.Macros.WhyText(why))
                     end
                 end)
@@ -76,7 +77,7 @@ local function build(panel)
             local done = ns.Macros.IsInstalled(m) and "  |cFF73E65Ainstalada|r" or ""
             local rep = m.noRepeat and "  |cFFFFAA00sem repeat|r" or ""
             card.name:SetText(m.name .. state .. rep .. done)
-            card.install.label:SetText(ns.Macros.IsInstalled(m) and "Atualizar" or "Criar")
+            card.install.label:SetText(ns.Macros.IsInstalled(m) and L["Atualizar"] or L["Criar"])
             card.install:SetEnabled(body ~= nil)
             card.install:SetAlpha(body and 1 or 0.4)
         end

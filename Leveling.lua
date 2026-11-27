@@ -1,6 +1,8 @@
 -- Leveling.lua: regras puras do guia por hub (spec 002). Sem API do jogo nem db:
 -- tudo chega por parâmetro, então tudo é testável fora do jogo.
 local _, ns = ...
+local L = ns and ns.L or setmetatable({}, { __index = function(_, k) return k end }) -- spec 066 (o arquivo também roda sozinho)
+local K = ns and ns.Locale and ns.Locale.K or function(s) return s end -- spec 066
 ns = ns or {}
 local Leveling = {}
 ns.Leveling = Leveling
@@ -193,6 +195,63 @@ function Leveling.Untangle(start, stops, dist)
                     reverse(route, i, j)
                     if segmentOk(route, i, j) then improved = true else reverse(route, i, j) end
                 end
+            end
+        end
+        if not improved then break end
+    end
+    local legs, cursor = 0, start
+    for _, s in ipairs(route) do
+        legs = legs + d(cursor, s.point)
+        cursor = s.point
+    end
+    return route, legs, cursor
+end
+
+-- Spec 068, R7: mudar uma parada de lugar (or-opt). O 2-opt só inverte trechos e não tira do
+-- caminho uma parada isolada deixada para o fim (pegar longe, depois voltar). A ordem continua
+-- valendo: a parada só vai para depois das que ela espera (`after`) e antes das que esperam por ela.
+local RELOCATE_PASSES = 10
+local function orderOk(route)
+    local pos = {}
+    for i, s in ipairs(route) do if s.key then pos[s.key] = i end end
+    for i, s in ipairs(route) do
+        for _, k in ipairs(s.after or {}) do
+            if pos[k] and pos[k] > i then return false end
+        end
+    end
+    return true
+end
+function Leveling.Relocate(start, stops, dist)
+    local route = {}
+    for i, s in ipairs(stops) do route[i] = s end
+    local n = #route
+    local function d(a, b) return (a and b) and legOf(dist, a, b) or 0 end
+    for _ = 1, (n >= 3) and RELOCATE_PASSES or 0 do
+        local improved = false
+        for i = 1, n do
+            local s = route[i]
+            local prev = i > 1 and route[i - 1].point or start
+            local nxt = route[i + 1] and route[i + 1].point
+            local removeGain = d(prev, s.point) + d(s.point, nxt) - d(prev, nxt)
+            local rest = {}
+            for k, x in ipairs(route) do if k ~= i then rest[#rest + 1] = x end end
+            local bestK, bestGain = nil, 1e-6
+            for k = 0, #rest do -- depois de rest[k] (k = 0: no começo)
+                if k ~= i - 1 then
+                    local a = k > 0 and rest[k].point or start
+                    local b = rest[k + 1] and rest[k + 1].point
+                    local gain = removeGain - (d(a, s.point) + d(s.point, b) - d(a, b))
+                    if gain > bestGain then
+                        table.insert(rest, k + 1, s)
+                        if orderOk(rest) then bestK, bestGain = k, gain end
+                        table.remove(rest, k + 1)
+                    end
+                end
+            end
+            if bestK then
+                table.insert(rest, bestK + 1, s)
+                route = rest
+                improved = true
             end
         end
         if not improved then break end
@@ -441,7 +500,7 @@ end
 -- Spec 006, R20: seguindo uma quest sem ponto de objetivo, por quê? nil = não falta objetivo (vai entregar).
 function Leveling.NoPointReason(objectives, dungeon)
     for _, o in ipairs(objectives or {}) do
-        if not o.done then return dungeon and "masmorra" or "sem coordenada" end
+        if not o.done then return dungeon and "masmorra" or K("sem coordenada") end
     end
     return nil
 end
@@ -655,8 +714,14 @@ function Leveling.MobTolerance(gearOffset, combatOffset, recentDeath)
 end
 
 local function workSeconds(o, p)
-    local factor = p.playerLevel and Leveling.KillFactor(o.avgLevel, p.playerLevel) or 1
-    return (o.kills or 0) * (p.ttk + (p.downtime or 0)) * factor + (o.objects or 0) * Leveling.OBJECT_SECONDS
+    local per
+    if p.killCurve and p.playerLevel then -- spec 067, R6: tempo medido pela diferença de nível
+        per = Leveling.KillSecondsFor(p.killCurve, p.ttk, o.avgLevel, p.playerLevel) + (p.downtime or 0)
+    else
+        local factor = p.playerLevel and Leveling.KillFactor(o.avgLevel, p.playerLevel) or 1
+        per = (p.ttk + (p.downtime or 0)) * factor
+    end
+    return (o.kills or 0) * per + (o.objects or 0) * Leveling.OBJECT_SECONDS
 end
 
 Leveling.MAX_LEVELS_ABOVE = 4 -- spec 025: quest "vermelha" demais (também o filtro de quest nova, Data.lua)
@@ -685,32 +750,86 @@ local function asideReason(q, p)
     -- Spec 046, R8: cinza sai, salvo classe, bolsa, item que vale (goal) ou entrega pronta.
     if q.state ~= "entregar" and Leveling.IsGrayQuest(q.qLevel, p.playerLevel)
         and not (q.classQuest or q.bag or q.goal) then
-        return "cinza"
+        return K("cinza")
     end
     -- Spec 025, R1: quest do log alta demais sai do circuito; a entrega pronta fica.
-    if Leveling.TooHigh(q.qLevel, p.playerLevel, q.state) then return "nível alto" end
+    if Leveling.TooHigh(q.qLevel, p.playerLevel, q.state) then return K("nível alto") end
     local high -- spec 030, R3: o objetivo mais alto decide; backAt = nível em que volta
     for _, o in ipairs(pending(q)) do
         if Leveling.MobsTooHigh(o.avgLevel, p.playerLevel, q.state, p.mobTolerance) then high = max(high or 0, o.avgLevel) end
     end
-    if high then return "mobs altos", math.ceil(high - (p.mobTolerance or Leveling.MAX_MOB_ABOVE)) end -- spec 031, R6
-    if q.dungeon then return q.group == "grupo" and "masmorra (em grupo)" or "dungeon" end -- spec 054, R3
+    if high then return K("mobs altos"), math.ceil(high - (p.mobTolerance or Leveling.MAX_MOB_ABOVE)) end -- spec 031, R6
+    if q.dungeon then return q.group == "grupo" and K("masmorra (em grupo)") or "dungeon" end -- spec 054, R3
     if q.elite and q.group ~= "grupo" then return "elite" end
-    if q.state == "pegar" and #(q.starters or {}) == 0 then return "sem coordenada" end
-    if #(q.finishers or {}) == 0 then return "sem coordenada" end
+    -- Spec 067, R4: evento ou quest que já te matou duas vezes, sem a escolha "grupo"
+    if q.state ~= "entregar" and q.group ~= "grupo" then
+        if q.event then return K("evento") end
+        if Leveling.DeathRisky(q.deaths, q.deathLevel, p.playerLevel) then return K("te matou") end
+    end
+    if q.state == "pegar" and #(q.starters or {}) == 0 then return K("sem coordenada") end
+    if #(q.finishers or {}) == 0 then return K("sem coordenada") end
     for _, o in ipairs(pending(q)) do
-        if #(o.points or {}) == 0 then return "sem coordenada" end
+        if #(o.points or {}) == 0 then return K("sem coordenada") end
     end
     return nil
 end
 
 Leveling.AsideReason = asideReason -- spec 054, R3
 
--- Spec 054, R1: quest de grupo? "masmorra", "elite" ou nil.
-function Leveling.GroupKind(elite, dungeon)
+-- Spec 054, R1: quest de grupo? "masmorra", "elite" ou nil. Spec 067, R3: "evento" (risky).
+function Leveling.GroupKind(elite, dungeon, risky)
     if dungeon then return "masmorra" end
     if elite then return "elite" end
+    if risky then return "evento" end
     return nil
+end
+
+-- Spec 067, R2: duas mortes na mesma quest; R2a: valem até 2 níveis depois da última.
+Leveling.DEATH_RISK, Leveling.DEATH_LEVELS = 2, 2
+function Leveling.DeathRisky(n, atLevel, level)
+    if (n or 0) < Leveling.DEATH_RISK then return false end
+    return not (atLevel and level and level - atLevel >= Leveling.DEATH_LEVELS)
+end
+
+-- Spec 067, R5a: a morte só conta para a parada se foi perto do alvo da seta.
+Leveling.DEATH_NEAR = 150
+function Leveling.DeathCounts(dist) return dist ~= nil and dist <= Leveling.DEATH_NEAR end
+
+-- Spec 067, R6: mediana do tempo por morte por diferença de nível (mob − você, de −6 a +3).
+Leveling.KILL_DIFF_MIN, Leveling.KILL_DIFF_MAX = -6, 3
+function Leveling.KillDiff(avgLevel, playerLevel)
+    local d = math.floor((avgLevel or playerLevel) - playerLevel + 0.5)
+    return math.max(Leveling.KILL_DIFF_MIN, math.min(Leveling.KILL_DIFF_MAX, d))
+end
+function Leveling.KillCurve(samples, minSamples)
+    local by = {}
+    for _, s in ipairs(samples or {}) do
+        if s.d and s.s then by[s.d] = by[s.d] or {}; table.insert(by[s.d], s.s) end
+    end
+    local out = {}
+    for d, list in pairs(by) do
+        if #list >= (minSamples or 5) then
+            table.sort(list)
+            local n = #list
+            out[d] = n % 2 == 1 and list[(n + 1) / 2] or (list[n / 2] + list[n / 2 + 1]) / 2
+        end
+    end
+    return out
+end
+function Leveling.KillSecondsFor(curve, base, avgLevel, playerLevel)
+    if not playerLevel then return base end
+    local d = Leveling.KillDiff(avgLevel, playerLevel)
+    if curve then
+        if curve[d] then return curve[d] end
+        local best
+        for k in pairs(curve) do
+            if not best or math.abs(k - d) < math.abs(best - d) or (math.abs(k - d) == math.abs(best - d) and k > best) then best = k end
+        end
+        if best then
+            return curve[best] * Leveling.KillFactor(playerLevel + d, playerLevel) / Leveling.KillFactor(playerLevel + best, playerLevel)
+        end
+    end
+    return base * Leveling.KillFactor(avgLevel, playerLevel)
 end
 
 local function ownEstimate(q, p)
@@ -733,7 +852,7 @@ local function fitLog(kept, p, aside)
     for i = 1, excess do out[pickups[i].id] = true end
     local fitted = {}
     for _, e in ipairs(kept) do
-        if out[e.id] then aside[#aside + 1] = { id = e.id, reason = "log cheio" }
+        if out[e.id] then aside[#aside + 1] = { id = e.id, reason = K("log cheio") }
         else fitted[#fitted + 1] = e end
     end
     return fitted
@@ -831,7 +950,7 @@ local function dropDependents(items, questOf, out, aside)
             local pre = not out[q.id] and blockedBy(q, out)
             if pre then
                 out[q.id], changed = true, true
-                aside[#aside + 1] = { id = q.id, reason = "depende de " .. pre }
+                aside[#aside + 1] = { id = q.id, reason = L["depende de "] .. pre }
             end
         end
     end
@@ -865,7 +984,7 @@ function Leveling.BuildCircuit(quests, start, p, dist)
     end
     local kept, dropped = Leveling.SelectQuests(entries, p.threshold or 0)
     for _, e in ipairs(dropped) do -- spec 046, R3: a do log sai com "rende pouco" (e não é abandonada)
-        aside[#aside + 1] = { id = e.id, reason = e.quest.state == "fazer" and "rende pouco" or "abaixo do limiar" }
+        aside[#aside + 1] = { id = e.id, reason = e.quest.state == "fazer" and K("rende pouco") or K("abaixo do limiar") }
     end
     for _, e in ipairs(dropped) do out[e.id] = true end
     -- R13a + R15: refaz o corte do log sem quem saiu por depender, até não mudar.
@@ -899,7 +1018,7 @@ function Leveling.BuildCircuit(quests, start, p, dist)
         local final = {}
         for _, e in ipairs(kept) do
             if e.chain and not needed[e.id] then
-                aside[#aside + 1] = { id = e.id, reason = e.quest.state == "fazer" and "rende pouco" or "abaixo do limiar" }
+                aside[#aside + 1] = { id = e.id, reason = e.quest.state == "fazer" and K("rende pouco") or K("abaixo do limiar") }
             else final[#final + 1] = e end
         end
         local changed = #final < #kept
@@ -963,7 +1082,9 @@ function Leveling.BuildCircuit(quests, start, p, dist)
             appendAll(all, laterStops)
             local ordered = Leveling.NearestOrder(cursor, all, dist)
             local l, c
-            ordered, l, c = Leveling.Untangle(cursor, ordered, dist) -- spec 053, R3
+            ordered = Leveling.Untangle(cursor, ordered, dist) -- spec 053, R3
+            ordered = Leveling.Relocate(cursor, ordered, dist) -- spec 068, R7
+            ordered, l, c = Leveling.Untangle(cursor, ordered, dist)
             for _, st in ipairs(ordered) do st.round = ri end -- spec 006, R16
             appendAll(stops, ordered); legs, cursor = legs + l, c
         end
@@ -1001,7 +1122,13 @@ end
 -- mode: "turnin" (mais perto com entrega pronta), "best" (maior taxa com piso de 2 quests),
 -- "next" (turnin; se não houver, best).
 local MIN_QUESTS = 2
-function Leveling.PickHub(hubs, mode)
+function Leveling.PickHub(hubs, mode, preferZone)
+    -- Spec 068, R3: a rota da zona ganha em "best" e "next"; "turnin" segue a regra de antes.
+    if preferZone and mode ~= "turnin" then
+        for _, h in ipairs(hubs) do
+            if h.zone and (h.quests or 0) > 0 then return h.key end
+        end
+    end
     if mode ~= "best" then
         local best, bestD
         for _, h in ipairs(hubs) do
@@ -1031,7 +1158,7 @@ function Leveling.PickBag(list, zoneMap)
     local best, bestKey
     for _, b in ipairs(list) do
         local s = b.step or b
-        if not b.skipped and (s.status == "no log" or s.status == "disponível") then
+        if not b.skipped and (s.status == K("no log") or s.status == K("disponível")) then
             local key = (s.mapID == zoneMap and 0 or 1) * 1000 + s.level
             if not bestKey or key < bestKey then best, bestKey = b, key end
         end
@@ -1076,21 +1203,21 @@ end
 -- do log; nearZones = { [zona] = true } de "Perto". Prontas ("entregar") de qualquer zona, as de fora
 -- de "Perto" com far (até farMax), em ordem de travel (sem travel por último; empate pela posição no
 -- log). Depois as de "Perto" que perdem XP se subir de nível antes: "perde XP no nível L+1", com loss.
-function Leveling.BeforeLeaving(items, L, nearZones, farMax)
+function Leveling.BeforeLeaving(items, lvl, nearZones, farMax)
     farMax = farMax or 5
     local ready, far, losing = {}, {}, {}
     local falloff = ns.Util.XPFalloff
     for i, it in ipairs(items or {}) do
         local isNear = it.zone and nearZones and nearZones[it.zone]
         if it.zone and it.ready then
-            local e = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel, reason = "entregar",
+            local e = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel, reason = K("entregar"),
                 travel = it.travel, far = (not isNear) or nil, pos = i }
             if isNear then ready[#ready + 1] = e else far[#far + 1] = e end
         elseif isNear and it.qLevel then
-            local now, next = falloff(L, it.qLevel), falloff(L + 1, it.qLevel)
+            local now, next = falloff(lvl, it.qLevel), falloff(lvl + 1, it.qLevel)
             if next < now then
                 losing[#losing + 1] = { id = it.id, name = it.name, zone = it.zone, qLevel = it.qLevel,
-                    reason = "perde XP no nível " .. (L + 1), loss = now - next }
+                    reason = L["perde XP no nível "] .. (lvl + 1), loss = now - next }
             end
         end
     end
@@ -1156,7 +1283,7 @@ Leveling.CHAIN_STEPS = 5
 Leveling.DUNGEON_STEP_SECONDS = 900 -- estimativa: a parte de uma quest numa ida à masmorra
 
 -- R1: passos adiante de q, em largura. nextOf(id) → ids; infoOf(id) → { level, dungeon, done }.
-function Leveling.ChainWalk(q, nextOf, infoOf, L, opts)
+function Leveling.ChainWalk(q, nextOf, infoOf, lvl, opts)
     local maxDepth = opts and opts.steps or Leveling.CHAIN_STEPS
     local group = opts and opts.group
     local out, seen, frontier = {}, { [q] = true }, { q }
@@ -1167,7 +1294,7 @@ function Leveling.ChainWalk(q, nextOf, infoOf, L, opts)
                 if not seen[n] then
                     seen[n] = true
                     local i = infoOf(n) or {}
-                    local stop = i.skip or (i.dungeon and not group) or (i.level and i.level > L + Leveling.MAX_LEVELS_ABOVE)
+                    local stop = i.skip or (i.dungeon and not group) or (i.level and i.level > lvl + Leveling.MAX_LEVELS_ABOVE)
                     if not stop then
                         if not i.done then out[#out + 1] = n end
                         nextFrontier[#nextFrontier + 1] = n
@@ -1215,7 +1342,7 @@ function Leveling.CleanupCandidates(items, threshold)
         local chainOk = it.chainRate and (it.hubRate or 0) > 0 and it.chainRate >= (threshold or 0) * it.hubRate
         if it.incomplete and not chainOk and not Leveling.Protected(it) then
             local weak = (it.hubRate or 0) > 0 and (it.rate or 0) < (threshold or 0) * it.hubRate
-            if it.gray or weak then out[#out + 1] = { id = it.id, reason = it.gray and "cinza" or "rende pouco" } end
+            if it.gray or weak then out[#out + 1] = { id = it.id, reason = it.gray and K("cinza") or K("rende pouco") } end
         end
     end
     return out

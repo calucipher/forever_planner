@@ -1,5 +1,6 @@
 -- UI/MinimapButton.lua: botão no minimapa e entrada no menu de addons (spec 004).
 local _, ns = ...
+local L = ns.L -- spec 066
 local Button = {}
 ns.MinimapButton = Button
 
@@ -29,9 +30,9 @@ end
 local function showTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("|cFF9482C9Forever|r Planner", 1, 1, 1)
-    GameTooltip:AddLine("Clique: abre/fecha o painel", 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("Clique direito: recalcula a rota (hub de maior XP/h da zona)", 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("Arraste: move o botão", 0.6, 0.6, 0.7)
+    GameTooltip:AddLine(L["Clique: abre/fecha o painel"], 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["Clique direito: recalcula a rota (hub de maior XP/h da zona)"], 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["Arraste: move o botão"], 0.6, 0.6, 0.7)
     GameTooltip:Show()
 end
 
@@ -75,7 +76,7 @@ function Button.Toggle()
     local m = ns.FP.db.minimap
     m.hide = not m.hide
     if Button.frame then Button.frame:SetShown(not m.hide) end
-    ns.FP.Print(m.hide and "botão do minimapa escondido (/fp minimapa mostra de novo)." or "botão do minimapa visível.")
+    ns.FP.Print(m.hide and L["botão do minimapa escondido (/fp minimapa mostra de novo)."] or L["botão do minimapa visível."])
 end
 
 -- R5: o .toc aponta para esta função (## AddonCompartmentFunc).

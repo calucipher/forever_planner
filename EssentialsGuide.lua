@@ -1,6 +1,7 @@
 -- EssentialsGuide.lua: adaptador da spec 062 (Essenciais). Junta os fatos do personagem para a regra
 -- pura (Essentials.Build) e leva a seta a cada item.
 local _, ns = ...
+local L = ns.L -- spec 066
 local ESG = {}
 ns.EssentialsGuide = ESG
 
@@ -69,9 +70,9 @@ end
 
 -- R1: os fatos. Cada parte em pcall: uma falha não esconde a lista inteira.
 function ESG.Facts()
-    local L = UnitLevel("player")
+    local lvl = UnitLevel("player")
     local _, class = UnitClass("player")
-    local f = { level = L, class = class, money = _G.GetMoney and _G.GetMoney() or 0, weaponsMissing = {}, flightRed = {} }
+    local f = { level = lvl, class = class, money = _G.GetMoney and _G.GetMoney() or 0, weaponsMissing = {}, flightRed = {} }
     local function try(name, fn)
         local ok, err = pcall(fn)
         if not ok then ns.FP.Debug("essenciais: " .. name .. " falhou: " .. tostring(err)) end
@@ -79,11 +80,11 @@ function ESG.Facts()
     try("bolsas", function() for k, v in pairs(bagFacts()) do f[k] = v end end)
     try("quests de bolsa", function()
         local n = 0
-        for _, b in ipairs(ns.Data.ready and ns.Data.BagQuests(L) or {}) do if not b.skipped then n = n + 1 end end
+        for _, b in ipairs(ns.Data.ready and ns.Data.BagQuests(lvl) or {}) do if not b.skipped then n = n + 1 end end
         f.bagQuests = n
     end)
     try("treino", function()
-        local miss = ns.ClassGuide.MissingSpells(L) or {}
+        local miss = ns.ClassGuide.MissingSpells(lvl) or {}
         f.spellsMissing, f.newSpells = #miss, 0
         for _, s in ipairs(miss) do if s.new then f.newSpells = f.newSpells + 1 end end
     end)
@@ -93,8 +94,8 @@ function ESG.Facts()
         local best = ns.ClassGuide.Best()
         f.classQuest = best and string.format("%s (%s)", best.name, best.zone) or nil
         if not best then -- R1a: a próxima acima do nível
-            for _, e in ipairs(ns.ClassGuide.List(L + 10)) do
-                if (e.level or 0) > L and (not f.classNext or e.level < f.classNext) then f.classNext = e.level end
+            for _, e in ipairs(ns.ClassGuide.List(lvl + 10)) do
+                if (e.level or 0) > lvl and (not f.classNext or e.level < f.classNext) then f.classNext = e.level end
             end
         end
     end)
@@ -122,7 +123,7 @@ function ESG.Facts()
     try("gear", function()
         local r = ns.GearGuide.Result()
         for _, a in ipairs(r and r.advice or {}) do
-            if (a.reqLevel or 99) <= L and a.source ~= "masmorra" then f.gearNow = ns.GearGuide.ItemName(a.item); break end
+            if (a.reqLevel or 99) <= lvl and a.source ~= "masmorra" then f.gearNow = ns.GearGuide.ItemName(a.item); break end
         end
     end)
     try("socorros", function()
@@ -150,7 +151,7 @@ end
 local function goNearest(points, title)
     local from = ns.Planner.PlayerPoint()
     local p = from and ns.Planner.Nearest(from, points) or (points or {})[1]
-    if not p then ns.FP.Print("não achei onde fica: " .. title); return end
+    if not p then ns.FP.Print(L["não achei onde fica: "] .. title); return end
     ns.Gps.SetTarget(p.mapID, p.x, p.y, title .. ": " .. tostring(p.name or ""))
 end
 local function bySub(sub) return ns.Data.NpcsBySubName(sub, (_G.UnitFactionGroup("player"))) end
@@ -165,8 +166,8 @@ function ESG.Go(key)
     elseif key == "montaria" then
         -- parecer 062: montaria de classe leva ao treinador da classe mesmo sem feitiço novo
         if CLASS_MOUNT[class] then ns.ClassGuide.FollowClassTrainer(true)
-        else goNearest(bySub("Riding Trainer"), "Treinador de montaria") end
-    elseif key == "pedra" or key == "comida" then goNearest(ns.Data.Innkeepers((_G.UnitFactionGroup("player"))), "Estalajadeiro")
+        else goNearest(bySub("Riding Trainer"), L["Treinador de montaria"]) end
+    elseif key == "pedra" or key == "comida" then goNearest(ns.Data.Innkeepers((_G.UnitFactionGroup("player"))), L["Estalajadeiro"])
     elseif key == "voo" then
         local here = ns.Guide.ZoneMap(C_Map.GetBestMapForUnit("player"))
         local zone = here and ns.Guide.MapZone(here)
@@ -174,15 +175,15 @@ function ESG.Go(key)
         for _, p in ipairs(ns.Planner.FlightNodesWithZone(here, ns.Guide.MapZone)) do
             if p.known == false and p.zone == zone then red[#red + 1] = { mapID = p.mapID, x = p.x, y = p.y, name = p.name } end
         end
-        goNearest(red, "Abrir ponto de voo")
+        goNearest(red, L["Abrir ponto de voo"])
     elseif key == "gear" then if ns.UI and ns.UI.Select then ns.UI.Select("gear") end
     elseif key == "municao" then
         local pts = {}
         for _, sub in ipairs({ "Ammunition Vendor", "Bowyer", "Gunsmith", "Arrows & Bullets" }) do
             for _, p in ipairs(bySub(sub)) do pts[#pts + 1] = p end
         end
-        goNearest(pts, "Munição")
-    elseif key == "socorros" then goNearest(bySub("First Aid Trainer"), "Treinador de Primeiros Socorros")
+        goNearest(pts, L["Munição"])
+    elseif key == "socorros" then goNearest(bySub("First Aid Trainer"), L["Treinador de Primeiros Socorros"])
     elseif key == "bolsas" then ns.Guide.FollowBag()
     end
 end
@@ -192,7 +193,7 @@ function ESG.FollowFirst()
     for _, it in ipairs(ESG.List()) do
         if it.status == "pendente" then ESG.Go(it.key); return end
     end
-    ns.FP.Print("nenhum essencial pendente.")
+    ns.FP.Print(L["nenhum essencial pendente."])
 end
 
 -- R6: /fp essenciais
@@ -200,7 +201,7 @@ function ESG.Print()
     local list = ESG.List()
     for _, it in ipairs(list) do
         local color = ({ pendente = "FFFF6666", conferir = "FFB0B0FF", depois = "FFFFD14D" })[it.status] or "FF73E65A"
-        ns.FP.Print(string.format("|c%s%s|r %s%s", color, it.status, it.label, it.detail ~= "" and (" — " .. it.detail) or ""))
+        ns.FP.Print(string.format("|c%s%s|r %s%s", color, ns.L[it.status], it.label, it.detail ~= "" and (" — " .. it.detail) or ""))
     end
 end
 
@@ -213,7 +214,7 @@ ns.FP.On("LEVEL_UP", function()
             local names = {}
             for _, it in ipairs(list) do if it.status == "pendente" then names[#names + 1] = it.label end end
             if #names > 0 then
-                ns.FP.Print(string.format("|cFFFFD100%d essenciais pendentes:|r %s (aba Guia > Essenciais)", #names, table.concat(names, ", ")))
+                ns.FP.Print(string.format(L["|cFFFFD100%d essenciais pendentes:|r %s (aba Guia > Essenciais)"], #names, table.concat(names, ", ")))
             end
         end)
     end)

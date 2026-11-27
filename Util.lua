@@ -1,5 +1,6 @@
 -- Util.lua: funções puras (testáveis fora do jogo) e guards de API.
 local _, ns = ...
+local L = ns and ns.L or setmetatable({}, { __index = function(_, k) return k end }) -- spec 066 (o arquivo também roda sozinho)
 ns = ns or {}
 local Util = {}
 ns.Util = Util
@@ -210,10 +211,10 @@ end
 
 -- Spec 013: título da seta. kind = "pegar" | "entregar" | "objetivo"; alvo = nome do NPC/objeto (ou nil).
 function Util.TargetTitle(kind, target, text)
-    if kind == "objetivo" then return "Objetivo: " .. text end
-    local verb = kind == "pegar" and "Pegar" or "Entregar"
+    if kind == "objetivo" then return L["Objetivo: "] .. text end
+    local verb = kind == "pegar" and L["Pegar"] or L["Entregar"]
     if target and target ~= "" then
-        return verb .. (kind == "pegar" and " com " or " a ") .. target .. ": " .. text
+        return verb .. (kind == "pegar" and L[" com "] or L[" a "]) .. target .. ": " .. text
     end
     return verb .. ": " .. text
 end
@@ -244,6 +245,25 @@ function Util.IsEscort(texts)
     return false
 end
 
+-- Spec 067, R1: quest de evento (defender, proteger, sobreviver, ondas, escolta) pelo texto dos objetivos.
+local EVENT_WORDS = { "defend", "protect", "survive", "escort", "wave", "waves" }
+local EVENT_PHRASES = { "hold off", "fend off", "after he finishes", "after she finishes", "after it finishes",
+    "keep him alive", "keep her alive" }
+function Util.IsEvent(texts)
+    for _, t in ipairs(texts or {}) do
+        if type(t) == "string" then
+            local s = t:lower()
+            for _, w in ipairs(EVENT_WORDS) do
+                if s:find("%f[%a]" .. w .. "%f[%A]") then return true end
+            end
+            for _, ph in ipairs(EVENT_PHRASES) do
+                if s:find(ph, 1, true) then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- Spec 057, R1: índice do destino pelo nome; sem igual, pelo nome antes da vírgula (sem maiúscula).
 function Util.TaxiPick(names, target)
     if not target then return nil end
@@ -256,8 +276,8 @@ end
 
 -- Spec 013, R6 (emenda de 24/11/2026): objetivo num objeto diz o que pegar.
 function Util.ObjectiveTitle(label, object)
-    local title = "Objetivo: " .. tostring(label or "?")
-    if object and object ~= "" then title = title .. " · pegue: " .. object end
+    local title = L["Objetivo: "] .. tostring(label or "?")
+    if object and object ~= "" then title = title .. L[" · pegue: "] .. object end
     return title
 end
 

@@ -1,12 +1,13 @@
 -- UI/QuestsTab.lua: ranking de quests da zona. Clique numa linha = GPS segue a quest.
 -- Spec 047 (emenda de 21/11/2026): a aba tem duas seções, Quests e Level (o painel da spec 035).
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local Theme, Util = ns.Theme, ns.Util
 
 local ROW_H, VISIBLE = 30, 9 -- 9: a barra de seções (Quests | Level) ocupa uma linha
 
 local columns = { -- x, largura, título
-    { 6, 62, "" }, { 72, 28, "Nv" }, { 102, 200, "Quest" }, { 304, 64, "XP" },
+    { 6, 62, "" }, { 72, 28, K("Nv") }, { 102, 200, "Quest" }, { 304, 64, "XP" },
     { 370, 46, "Min" }, { 418, 60, "XP/min" }, { 480, 92, "Upgrade" },
 }
 
@@ -14,13 +15,13 @@ local function buildQuests(panel)
     local api, rows, data, offset = {}, {}, {}, 0
 
     -- Barra de ações
-    local follow = Theme.Button(panel, "Seguir a melhor", 140, 24, function() ns.Planner.FollowBest() end, "primary")
+    local follow = Theme.Button(panel, L["Seguir a melhor"], 140, 24, function() ns.Planner.FollowBest() end, "primary")
     follow:SetPoint("TOPLEFT", 0, -4)
-    local stop = Theme.Button(panel, "Parar GPS", 90, 24, function()
+    local stop = Theme.Button(panel, L["Parar GPS"], 90, 24, function()
         ns.Gps.Clear(); ns.FP.db.following = nil; api.Refresh()
     end)
     stop:SetPoint("LEFT", follow, "RIGHT", 6, 0)
-    local refresh = Theme.Button(panel, "Atualizar", 80, 24, function() api.Refresh() end)
+    local refresh = Theme.Button(panel, L["Atualizar"], 80, 24, function() api.Refresh() end)
     refresh:SetPoint("LEFT", stop, "RIGHT", 6, 0)
     local summary = Theme.Text(panel, 11, Theme.c.muted)
     summary:SetPoint("RIGHT", panel, "TOPRIGHT", -4, -16)
@@ -31,7 +32,7 @@ local function buildQuests(panel)
     header:SetPoint("TOPLEFT", 0, -34); header:SetPoint("TOPRIGHT", 0, -34); header:SetHeight(20)
     for _, c in ipairs(columns) do
         local t = Theme.Text(header, 10, Theme.c.muted)
-        t:SetPoint("LEFT", c[1], 0); t:SetWidth(c[2]); t:SetText(c[3])
+        t:SetPoint("LEFT", c[1], 0); t:SetWidth(c[2]); t:SetText(L[c[3]])
     end
 
     local list = CreateFrame("Frame", nil, panel)
@@ -48,18 +49,18 @@ local function buildQuests(panel)
         if not r then return end
         GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
         GameTooltip:AddLine(r.name, 1, 1, 1)
-        GameTooltip:AddLine(string.format("Nível %d · %s", r.level, r.state:upper()), 0.7, 0.55, 1)
-        local src = r.xpSrc == "real" and "valor real" or (r.xpSrc == "db" and "QuestieDB" or "estimativa")
+        GameTooltip:AddLine(string.format(L["Nível %d · %s"], r.level, r.state:upper()), 0.7, 0.55, 1)
+        local src = r.xpSrc == "real" and L["valor real"] or (r.xpSrc == "db" and "QuestieDB" or "estimativa")
         GameTooltip:AddDoubleLine("XP", Util.FormatInt(r.xp) .. " (" .. src .. ")", 0.8, 0.8, 0.8, 1, 0.82, 0.3)
-        GameTooltip:AddDoubleLine("Tempo estimado", string.format("%.1f min", r.minutes), 0.8, 0.8, 0.8, 1, 1, 1)
-        if r.money > 0 then GameTooltip:AddDoubleLine("Ouro", Util.FormatMoney(r.money), 0.8, 0.8, 0.8, 1, 1, 1) end
+        GameTooltip:AddDoubleLine(L["Tempo estimado"], string.format("%.1f min", r.minutes), 0.8, 0.8, 0.8, 1, 1, 1)
+        if r.money > 0 then GameTooltip:AddDoubleLine(L["Ouro"], Util.FormatMoney(r.money), 0.8, 0.8, 0.8, 1, 1, 1) end
         if r.rewardID then
-            local name = C_Item.GetItemInfo(r.rewardID) or ("item " .. r.rewardID)
-            GameTooltip:AddDoubleLine("Melhor recompensa", name, 0.8, 0.8, 0.8, 0.45, 0.9, 0.35)
-            GameTooltip:AddDoubleLine("Ganho de score", string.format("+%.1f", r.delta), 0.8, 0.8, 0.8, 0.45, 0.9, 0.35)
+            local name = C_Item.GetItemInfo(r.rewardID) or (L["item "] .. r.rewardID)
+            GameTooltip:AddDoubleLine(L["Melhor recompensa"], name, 0.8, 0.8, 0.8, 0.45, 0.9, 0.35)
+            GameTooltip:AddDoubleLine(L["Ganho de score"], string.format("+%.1f", r.delta), 0.8, 0.8, 0.8, 0.45, 0.9, 0.35)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Clique: GPS segue esta quest", 0.6, 0.6, 0.7)
+        GameTooltip:AddLine(L["Clique: GPS segue esta quest"], 0.6, 0.6, 0.7)
         GameTooltip:Show()
     end
 
@@ -131,7 +132,7 @@ local function buildQuests(panel)
             end
         end
         local n = #data
-        scrollInfo:SetText(n > VISIBLE and string.format("%d-%d de %d  (role com a roda)",
+        scrollInfo:SetText(n > VISIBLE and string.format(L["%d-%d de %d  (role com a roda)"],
             offset + 1, math.min(offset + VISIBLE, n), n) or "")
     end
 
@@ -141,25 +142,25 @@ local function buildQuests(panel)
     end)
 
     function api.Refresh()
-        if not ns.Data.Q then empty:SetText("QuestieDB não carregado."); return end
+        if not ns.Data.Q then empty:SetText(L["QuestieDB não carregado."]); return end
         if not ns.Data.ready then
-            empty:SetText("Indexando recompensas da QuestieDB...")
-            ns.UI.SetStatus("Preparando base de dados...")
+            empty:SetText(L["Indexando recompensas da QuestieDB..."])
+            ns.UI.SetStatus(L["Preparando base de dados..."])
         else
             empty:SetText("")
         end
         data = ns.Planner.Rank()
-        if #data == 0 and ns.Data.ready then empty:SetText("Nenhuma quest elegível nesta zona.") end
+        if #data == 0 and ns.Data.ready then empty:SetText(L["Nenhuma quest elegível nesta zona."]) end
         offset = math.min(offset, math.max(0, #data - VISIBLE))
         local inLog = 0
         for _, r in ipairs(data) do if r.state ~= "pegar" then inLog = inLog + 1 end end
         local f = ns.Planner.failures
-        summary:SetText(string.format("%d quests · %d no log%s", #data, inLog,
+        summary:SetText(string.format(L["%d quests · %d no log%s"], #data, inLog,
             f.count > 0 and string.format(" · |cFFFF6666%d falhas|r", f.count) or ""))
-        legend:SetText(f.first and ("|cFFFF6666Falha: " .. f.first .. "|r")
-            or "* XP estimada (vira real quando você abre a quest)  ·  XP inclui os mobs dos objetivos")
+        legend:SetText(f.first and (L["|cFFFF6666Falha: "] .. f.first .. "|r")
+            or L["* XP estimada (vira real quando você abre a quest)  ·  XP inclui os mobs dos objetivos"])
         local t = ns.Gps.target
-        ns.UI.SetStatus(t and ("|cFF73E65AGPS:|r " .. t.title) or "GPS parado. Clique numa quest ou em Seguir a melhor.")
+        ns.UI.SetStatus(t and (L["|cFF73E65AGPS:|r "] .. t.title) or L["GPS parado. Clique numa quest ou em Seguir a melhor."])
         render()
     end
     return api

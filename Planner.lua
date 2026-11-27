@@ -1,5 +1,6 @@
 -- Planner.lua: ranking de quests por zona (valor / tempo) e escolha do próximo passo do GPS.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Util = ns.Util
 local Planner = {}
 ns.Planner = Planner
@@ -164,7 +165,7 @@ function Planner.Evaluate(q, level, player)
     for _, o in ipairs(objectives) do
         if state ~= "entregar" and not o.done then
             for _, p in ipairs(o.points) do objPts[#objPts + 1] = p end
-            work = work + o.kills * perKill * ns.Leveling.KillFactor(o.avgLevel, level) -- spec 030, R5
+            work = work + o.kills * ns.Leveling.KillSecondsFor(FP.KillCurve(), perKill, o.avgLevel, level) -- spec 030, R5; 067, R7
                 + o.objects * ns.Leveling.OBJECT_SECONDS
             mobXP = mobXP + o.kills * o.mobXP
         end
@@ -180,7 +181,7 @@ function Planner.Evaluate(q, level, player)
     local seconds = Planner.EstimateSeconds({ legs = legs, count = 0, kind = "talk", speed = db.runSpeed }) + work
     local value = Planner.Value(xp, money, delta, mobXP, Util.Num(_G.UnitXPMax and _G.UnitXPMax("player")), db)
     return {
-        q = q, name = D.Q.name(q) or ("Quest " .. q), level = D.Q.questLevel(q) or 0,
+        q = q, name = D.Q.name(q) or (L["Quest "] .. q), level = D.Q.questLevel(q) or 0,
         state = state, xp = xp, xpSrc = xpSrc, money = money, mobXP = mobXP,
         rewardID = (delta and delta > 0) and rewardID or nil, delta = delta, loadingItems = loading,
         minutes = seconds / 60, rate = value / math.max(seconds / 60, 0.5), value = value,
@@ -228,10 +229,10 @@ function Planner.Follow(q)
         -- só solta a seta se ela era desta quest; o hub seguido (db.guide) fica como estava
         if db.following == q then db.following = nil; ns.Gps.Clear() end
         if label == "masmorra" then
-            ns.FP.Print(string.format("%s: o que falta é dentro de masmorra%s; faça em grupo. A quest fica no log.%s",
-                name, Planner.DungeonWhere(dungeon), db.guide and "" or " 'Recalcular rota' volta ao guia."))
+            ns.FP.Print(string.format(L["%s: o que falta é dentro de masmorra%s; faça em grupo. A quest fica no log.%s"],
+                name, Planner.DungeonWhere(dungeon), db.guide and "" or L[" 'Recalcular rota' volta ao guia."]))
         else
-            ns.FP.Print(name .. ": sem coordenada para o que falta. A quest fica no log.")
+            ns.FP.Print(name .. L[": sem coordenada para o que falta. A quest fica no log."])
         end
         ns.FP.Fire("CHANGED")
         return false
@@ -334,7 +335,7 @@ function Planner.CheckOffers(event)
         ns.FP.db.unavailable[q] = true
         changed = true
         ns.FP.Debug(string.format("indisponível: %s não oferecida (%s %s)", q, kind, id))
-        ns.FP.Print(string.format("|cFFFFAA00%s não está disponível aqui; tirei do plano.|r Volta sozinha quando o NPC oferecer. (/fp indisponiveis lista as marcadas)",
+        ns.FP.Print(string.format(L["|cFFFFAA00%s não está disponível aqui; tirei do plano.|r Volta sozinha quando o NPC oferecer. (/fp indisponiveis lista as marcadas)"],
             D.Q.name(q) or q))
         if ns.FP.db.following == q then Planner.FollowBest() end
         end
@@ -353,17 +354,17 @@ function Planner.ConfirmClearUnavailable(origem)
     for q in pairs(ns.FP.db.unavailable or {}) do
         names[#names + 1] = (ns.Data.Q and ns.Data.Q.name(q)) or tostring(q)
     end
-    if #names == 0 then ns.FP.Print("nenhuma quest marcada como indisponível."); return end
+    if #names == 0 then ns.FP.Print(L["nenhuma quest marcada como indisponível."]); return end
     table.sort(names)
     local dialogs, show = _G.StaticPopupDialogs, _G.StaticPopup_Show
     local function run()
         Planner.ClearUnavailable(origem)
-        ns.FP.Print(#names .. " quest(s) que o jogo não oferecia voltaram ao plano.")
+        ns.FP.Print(#names .. L[" quest(s) que o jogo não oferecia voltaram ao plano."])
     end
     if not (dialogs and show) then run(); return end
     dialogs.FOREVERPLANNER_REATIVAR = {
-        text = "Voltar ao plano as quests que o jogo não ofereceu?\n\n%s\n\n(Para só atualizar a seta, use 'Recalcular rota'.)",
-        button1 = "Reativar", button2 = "Cancelar", OnAccept = run,
+        text = L["Voltar ao plano as quests que o jogo não ofereceu?\n\n%s\n\n(Para só atualizar a seta, use 'Recalcular rota'.)"],
+        button1 = L["Reativar"], button2 = L["Cancelar"], OnAccept = run,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
     show("FOREVERPLANNER_REATIVAR", table.concat(names, "\n"))
@@ -484,7 +485,7 @@ function Planner.DungeonWhere(area)
         if not name then return "" end
         local d = ns.DungeonGuide and ns.DungeonGuide.ForActivity(name)
         local e = d and ns.DungeonGuide.Nearest(d)
-        return e and string.format(" (%s, entrada em %s)", name, ns.DungeonGuide.Where(e)) or string.format(" (%s)", name)
+        return e and string.format(L[" (%s, entrada em %s)"], name, ns.DungeonGuide.Where(e)) or string.format(" (%s)", name)
     end)
     return ok and text or ""
 end
@@ -493,16 +494,16 @@ end
 function Planner.FollowFlightPoint()
     local T = _G.C_TaxiMap
     if not (T and T.GetAllTaxiNodes and C_Map and C_Map.GetBestMapForUnit) then
-        ns.FP.Print("este client não informa os pontos de voo."); return
+        ns.FP.Print(L["este client não informa os pontos de voo."]); return
     end
     local map = Planner.ContinentMap(C_Map.GetBestMapForUnit("player"))
     local pts = Planner.KnownTaxiPoints(map) -- spec 044, R8
     local from = Planner.PlayerPoint()
-    if not from then ns.FP.Print("não consegui ler a sua posição agora."); return end
+    if not from then ns.FP.Print(L["não consegui ler a sua posição agora."]); return end
     local best = Planner.Nearest(from, pts)
-    if not best then ns.FP.Print("nenhum ponto de voo descoberto neste continente."); return end
-    ns.FP.Print("seguindo: ponto de voo " .. tostring(best.name))
-    ns.Gps.SetTarget(best.mapID, best.x, best.y, "Ponto de voo: " .. tostring(best.name))
+    if not best then ns.FP.Print(L["nenhum ponto de voo descoberto neste continente."]); return end
+    ns.FP.Print(L["seguindo: ponto de voo "] .. tostring(best.name))
+    ns.Gps.SetTarget(best.mapID, best.x, best.y, L["Ponto de voo: "] .. tostring(best.name))
 end
 
 function Planner.FollowBest()
@@ -511,7 +512,7 @@ function Planner.FollowBest()
         if rows[1] then
             if Planner.Follow(rows[1].q) then ns.FP.Print("seguindo:", rows[1].name) end
         else
-            ns.FP.Print("nenhuma quest elegível nesta zona.")
+            ns.FP.Print(L["nenhuma quest elegível nesta zona."])
         end
     end)
 end
@@ -537,7 +538,13 @@ ns.FP.On("QUEST_TURNED_IN", function(q)
     if db.following == q then
         db.following = nil
         ns.Gps.Clear()
-        if db.autoNext then C_Timer.After(1, Planner.FollowBest) end
+        -- Spec 006, R6a (26/11/2026): depois da quest solta, volta ao melhor hub da zona; quest solta só sem hub.
+        if db.autoNext then
+            C_Timer.After(1, function()
+                if ns.Guide and ns.Guide.FollowBest then ns.Guide.FollowBest("next", false, Planner.FollowBest)
+                else Planner.FollowBest() end
+            end)
+        end
     end
 end)
 

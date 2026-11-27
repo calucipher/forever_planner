@@ -2,6 +2,7 @@
 -- Frames do addon sobre o canvas do mapa: sem data provider da Blizzard (sem taint). Atualiza na
 -- troca de mapa e, com o mapa aberto, no máximo 5 vezes por segundo (zoom e pan).
 local _, ns = ...
+local L = ns.L -- spec 066
 local Pins = {}
 ns.DungeonPins = Pins
 
@@ -24,15 +25,15 @@ local function showTip(pin)
     local d = p.d
     GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
     GameTooltip:AddLine(d.name, 1, 1, 1)
-    GameTooltip:AddLine((p.kind == "stone" and "Meeting stone" or "Entrada") .. "  " .. DG.Range(d), 0.8, 0.8, 0.8)
+    GameTooltip:AddLine((p.kind == "stone" and "Meeting stone" or L["Entrada"]) .. "  " .. DG.Range(d), 0.8, 0.8, 0.8)
     if p.kind == "entrance" and p.p.est then
-        GameTooltip:AddLine("Posição estimativa (" .. tostring(p.p.source or "guia") .. "). Entre uma vez para gravar.", 1, 0.82, 0.3, true)
+        GameTooltip:AddLine(L["Posição estimativa ("] .. tostring(p.p.source or "guia") .. L["). Entre uma vez para gravar."], 1, 0.82, 0.3, true)
     elseif p.kind == "entrance" and p.p.learned then
-        GameTooltip:AddLine("Posição gravada no jogo.", 0.45, 0.9, 0.35)
+        GameTooltip:AddLine(L["Posição gravada no jogo."], 0.45, 0.9, 0.35)
     end
     local at = DG.AttuneText(d)
     if at then GameTooltip:AddLine(at, 1, 1, 1, true) end
-    GameTooltip:AddLine("Clique: seta até aqui", 0.6, 0.6, 0.7)
+    GameTooltip:AddLine(L["Clique: seta até aqui"], 0.6, 0.6, 0.7)
     GameTooltip:Show()
 end
 
@@ -47,8 +48,8 @@ local function acquire(canvas, i)
         pin:SetScript("OnClick", function(self)
             local p = self.data
             if not p then return end
-            if p.kind == "stone" then ns.Gps.SetTarget(p.p.m, p.p.mx, p.p.my, "Meeting stone: " .. p.d.name)
-            else ns.Gps.SetTarget(p.p.m, p.p.mx, p.p.my, "Entrada: " .. p.d.name .. (p.p.est and " (estimativa)" or "")) end
+            if p.kind == "stone" then ns.Gps.SetTarget(p.p.m, p.p.mx, p.p.my, L["Meeting stone: "] .. p.d.name)
+            else ns.Gps.SetTarget(p.p.m, p.p.mx, p.p.my, L["Entrada: "] .. p.d.name .. (p.p.est and L[" (estimativa)"] or "")) end
         end)
         pool[i] = pin
     end

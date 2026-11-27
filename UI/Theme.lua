@@ -1,5 +1,6 @@
 -- UI/Theme.lua: visual escuro com roxo de Warlock e verde vil para destaques.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Theme = {}
 ns.Theme = Theme
 
@@ -120,7 +121,7 @@ function Theme.LineList(box, rowH)
         for i, line in ipairs(d.tip or {}) do
             if i == 1 and not d.link then GameTooltip:AddLine(line, 1, 1, 1) else GameTooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
         end
-        if d.action then GameTooltip:AddLine(d.hint or "Clique: seguir", 0.6, 0.6, 0.7) end
+        if d.action then GameTooltip:AddLine(d.hint or L["Clique: seguir"], 0.6, 0.6, 0.7) end
         GameTooltip:Show()
     end
     local function row(i)

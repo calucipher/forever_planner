@@ -2,6 +2,7 @@
 -- regras puras de Lfg.lua e abre o whisper do líder com o texto pronto. Nunca envia, convida nem busca.
 -- Regras da R9: o painel é filho do UIParent, só faz SetPoint e HookScript no frame da Blizzard.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Theme, Lfg = ns.Theme, ns.Lfg
 local Panel = {}
 ns.LfgPanel = Panel
@@ -88,13 +89,13 @@ local function activityInfo(id)
 end
 
 local function readRows()
-    local L = _G.C_LFGList
-    if not L then return nil end
-    local ok, _, results = try("GetFilteredSearchResults", L.GetFilteredSearchResults)
+    local lvl = _G.C_LFGList
+    if not lvl then return nil end
+    local ok, _, results = try("GetFilteredSearchResults", lvl.GetFilteredSearchResults)
     if not ok then return nil end
     local rows, realm = {}, myRealm()
     for _, id in ipairs(results or {}) do
-        local okI, info = try("GetSearchResultInfo", L.GetSearchResultInfo, id)
+        local okI, info = try("GetSearchResultInfo", lvl.GetSearchResultInfo, id)
         if okI and info then
             local acts = {}
             for _, aid in ipairs(info.activityIDs or {}) do acts[#acts + 1] = activityInfo(aid) end
@@ -109,8 +110,8 @@ end
 local function statusText(key)
     local s = key and Lfg.Status(calls, key, _G.GetTime(), db().lfgCallTTL)
     if not s then return "" end
-    if s.state == "chamado" then return string.format("|cFFB38CFFchamado há %d min|r", math.floor(s.age / 60)) end
-    return "|cFF9E99B3sem resposta (est.)|r"
+    if s.state == "chamado" then return string.format(L["|cFFB38CFFchamado há %d min|r"], math.floor(s.age / 60)) end
+    return "|cFF9E99B3" .. L["sem resposta (est.)"] .. "|r"
 end
 
 local function rangeText(a)
@@ -126,14 +127,14 @@ end
 -- R11/R12: no próprio OnClick, sem corrotina nem timer.
 local function callLeader(row)
     if not Panel.CanRead() then return end
-    local L = UnitLevel("player")
-    local a = Lfg.BestActivity(row.acts, L)
+    local lvl = UnitLevel("player")
+    local a = Lfg.BestActivity(row.acts, lvl)
     local solo = (row.numMembers or 0) <= 1
     local text = Lfg.Message(solo and db().lfgWhisperSolo or db().lfgWhisper, fields(a and a.shortName))
     if db().lfgPrefill then
         local util = _G.ChatFrameUtil
         if not (util and util.SendTellWithMessage) then
-            ns.FP.Print("este client não tem ChatFrameUtil.SendTellWithMessage; use /fp lfg copiar")
+            ns.FP.Print(L["este client não tem ChatFrameUtil.SendTellWithMessage; use /fp lfg copiar"])
             return
         end
         if not try("SendTellWithMessage", util.SendTellWithMessage, row.leaderName, text) then return end
@@ -152,7 +153,7 @@ local function buildRow(parent, i)
     r.top:SetPoint("TOPLEFT", 6, -4); r.top:SetPoint("RIGHT", -96, 0)
     r.sub = Theme.Text(r, 10, Theme.c.muted)
     r.sub:SetPoint("TOPLEFT", r.top, "BOTTOMLEFT", 0, -3); r.sub:SetPoint("RIGHT", -96, 0)
-    r.btn = Theme.Button(r, "Chamar", 60, 22, function() if r.row then callLeader(r.row) end end, "primary")
+    r.btn = Theme.Button(r, L["Chamar"], 60, 22, function() if r.row then callLeader(r.row) end end, "primary")
     r.btn:SetPoint("RIGHT", -5, 0)
     -- Spec 041, R10: seta na entrada da masmorra da atividade.
     r.go = Theme.Button(r, ">", 22, 22, function() if r.dungeon then ns.DungeonGuide.GoEntrance(r.dungeon) end end)
@@ -161,12 +162,12 @@ local function buildRow(parent, i)
         local d = r.dungeon
         if not d then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Entrada: " .. d.name, 1, 1, 1)
+        GameTooltip:AddLine(L["Entrada: "] .. d.name, 1, 1, 1)
         GameTooltip:AddLine(ns.DungeonGuide.Where((ns.DungeonGuide.Nearest(d))), 0.8, 0.8, 0.8)
-        if d.stone then GameTooltip:AddLine("Meeting stone: " .. ns.DungeonGuide.Where(d.stone), 0.8, 0.8, 0.8) end
+        if d.stone then GameTooltip:AddLine(L["Meeting stone: "] .. ns.DungeonGuide.Where(d.stone), 0.8, 0.8, 0.8) end
         local at = ns.DungeonGuide.AttuneText(d)
         if at then GameTooltip:AddLine(at, 1, 1, 1, true) end
-        GameTooltip:AddLine("Clique: seta na entrada", 0.6, 0.6, 0.7)
+        GameTooltip:AddLine(L["Clique: seta na entrada"], 0.6, 0.6, 0.7)
         GameTooltip:Show()
     end)
     r.go:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -179,7 +180,7 @@ local function build()
     f:SetSize(320, 470); f:SetFrameStrata("HIGH"); f:SetClampedToScreen(true); f:Hide()
     f:EnableMouse(true)
     f.title = Theme.Text(f, 13, Theme.c.accent, "OUTLINE")
-    f.title:SetPoint("TOPLEFT", 10, -8); f.title:SetText("Forever Planner · grupos")
+    f.title:SetPoint("TOPLEFT", 10, -8); f.title:SetText(L["Forever Planner · grupos"])
     f.close = Theme.Button(f, "x", 20, 18, function() f:Hide() end)
     f.close:SetPoint("TOPRIGHT", -6, -6)
 
@@ -209,15 +210,15 @@ local function build()
     f.empty = Theme.Text(f.scroll.child, 11, Theme.c.muted)
     f.empty:SetPoint("TOPLEFT", 4, -4); f.empty:SetWordWrap(true); f.empty:SetWidth(290)
     f.soloTitle = Theme.Text(f.scroll.child, 11, Theme.c.accent) -- R10: título do bloco dos sozinhos
-    f.soloTitle:SetText("Jogadores sozinhos"); f.soloTitle:Hide()
+    f.soloTitle:SetText(L["Jogadores sozinhos"]); f.soloTitle:Hide()
     f.more = Theme.Text(f.scroll.child, 10, Theme.c.muted)  -- R10: o que passa de MAX_ROWS
     f.more:Hide()
 
     -- R15: listar-se sozinho.
     f.hint = Theme.Text(f, 10, Theme.c.muted)
     f.hint:SetPoint("BOTTOMLEFT", 10, 32); f.hint:SetWidth(300); f.hint:SetWordWrap(true)
-    f.hint:SetText("Listar sozinho: os líderes te convidam com um clique. Cole o texto no comentário da aba Listar.")
-    f.listBtn = Theme.Button(f, "Copiar texto do anúncio", 300, 20, function()
+    f.hint:SetText(L["Listar sozinho: os líderes te convidam com um clique. Cole o texto no comentário da aba Listar."])
+    f.listBtn = Theme.Button(f, L["Copiar texto do anúncio"], 300, 20, function()
         showCopy(f.copy, Lfg.Message(db().lfgListComment, fields(nil)))
     end)
     f.listBtn:SetPoint("BOTTOMLEFT", 10, 8)
@@ -241,18 +242,18 @@ end
 
 local function header(f)
     local r = role()
-    f.roleBtn.label:SetText("Papel: " .. (r or "?") .. (db().lfgRole and "" or " (auto)"))
-    f.modeBtn.label:SetText(db().lfgPrefill and "Chamar: abre o whisper" or "Chamar: só copia")
+    f.roleBtn.label:SetText(L["Papel: "] .. (r or "?") .. (db().lfgRole and "" or L[" (auto)"]))
+    f.modeBtn.label:SetText(db().lfgPrefill and L["Chamar: abre o whisper"] or L["Chamar: só copia"])
 end
 
-local function fill(f, list, L)
+local function fill(f, list, lvl)
     local y, soloShown = 0, false
     f.soloTitle:Hide()
     for i, r in ipairs(f.rows) do
         local row = list[i]
         r.row = row
         if row then
-            local a = Lfg.BestActivity(row.acts, L)
+            local a = Lfg.BestActivity(row.acts, lvl)
             local solo = (row.numMembers or 0) <= 1
             if solo and not soloShown then
                 soloShown = true
@@ -260,7 +261,7 @@ local function fill(f, list, L)
                 y = y + 20
             end
             local size = a and a.maxNumPlayers and a.maxNumPlayers > 0 and ("/" .. a.maxNumPlayers) or ""
-            local fit = a and Lfg.Fit(a, L)
+            local fit = a and Lfg.Fit(a, lvl)
             local color = fit == 0 and "|cFF73E659" or "|cFFEDEBF5"
             r.top:SetText(color .. ((a and a.shortName) or "?") .. "|r  " .. (solo and "sozinho" or ((row.numMembers or 0) .. size)))
             local d = a and ns.DungeonGuide.ForActivity(a.fullName or a.shortName)
@@ -268,10 +269,10 @@ local function fill(f, list, L)
             local st = d and ns.DungeonGuide.AttuneState(d)
             r.dungeon = e and d or nil
             local where = (e and ("  · " .. ns.DungeonGuide.MapName(e.m)) or "") ..
-                ((st and st.next) and ("  |cFFFFD14DAttune: falta " .. st.next.title .. "|r") or "")
+                ((st and st.next) and (L["  |cFFFFD14DAttune: falta "] .. st.next.title .. "|r") or "")
             r.sub:SetText((row.leaderName or "?") .. "  " .. rangeText(a) .. "  " .. statusText(row.key) .. where)
             if r.dungeon then r.go:Show() else r.go:Hide() end
-            if Lfg.CanCall(row, L) then r.btn:Show() else r.btn:Hide() end
+            if Lfg.CanCall(row, lvl) then r.btn:Show() else r.btn:Hide() end
             r:ClearAllPoints(); r:SetPoint("TOPLEFT", 0, -y); r:SetPoint("RIGHT")
             r:Show()
             y = y + ROW_H
@@ -281,7 +282,7 @@ local function fill(f, list, L)
     end
     local extra = #list - #f.rows
     if extra > 0 then
-        f.more:SetText(string.format("+%d anúncios (refine a busca)", extra))
+        f.more:SetText(string.format(L["+%d anúncios (refine a busca)"], extra))
         f.more:ClearAllPoints(); f.more:SetPoint("TOPLEFT", 4, -y - 4); f.more:Show()
         y = y + 20
     else
@@ -295,19 +296,19 @@ function Panel.Refresh()
     if not frame or not frame:IsShown() then return end
     header(frame)
     if not Panel.CanRead() then
-        fill(frame, {}, 0); frame.empty:SetText("lista indisponível agora (combate ou luta de chefe)"); frame.empty:Show()
+        fill(frame, {}, 0); frame.empty:SetText(L["lista indisponível agora (combate ou luta de chefe)"]); frame.empty:Show()
         return
     end
     local rows = readRows()
     if not rows then
-        fill(frame, {}, 0); frame.empty:SetText("não deu para ler a lista"); frame.empty:Show()
+        fill(frame, {}, 0); frame.empty:SetText(L["não deu para ler a lista"]); frame.empty:Show()
         return
     end
-    local L = UnitLevel("player")
-    local list = Lfg.Sort(rows, L, calls)
-    fill(frame, list, L)
+    local lvl = UnitLevel("player")
+    local list = Lfg.Sort(rows, lvl, calls)
+    fill(frame, list, lvl)
     if #list == 0 then
-        frame.empty:SetText("faça uma busca na janela do LFG; os grupos aparecem aqui, os do seu nível primeiro")
+        frame.empty:SetText(L["faça uma busca na janela do LFG; os grupos aparecem aqui, os do seu nível primeiro"])
         frame.empty:Show()
     else
         frame.empty:Hide()
@@ -350,15 +351,15 @@ function Panel.Command(rest)
     rest = rest or ""
     local cmd, arg = rest:match("^(%S*)%s*(.-)$")
     if cmd == "" then Panel.Toggle()
-    elseif cmd == "texto" and arg ~= "" then db().lfgWhisper = arg; ns.FP.Print("texto para grupo:", arg)
-    elseif cmd == "solo" and arg ~= "" then db().lfgWhisperSolo = arg; ns.FP.Print("texto para jogador sozinho:", arg)
+    elseif cmd == "texto" and arg ~= "" then db().lfgWhisper = arg; ns.FP.Print(L["texto para grupo:"], arg)
+    elseif cmd == "solo" and arg ~= "" then db().lfgWhisperSolo = arg; ns.FP.Print(L["texto para jogador sozinho:"], arg)
     elseif cmd == "padrao" then
         local d = ns.FP.defaults
         db().lfgWhisper, db().lfgWhisperSolo, db().lfgListComment = d.lfgWhisper, d.lfgWhisperSolo, d.lfgListComment
-        ns.FP.Print("textos do LFG de volta ao padrão")
-    elseif cmd == "copiar" then db().lfgPrefill = false; ns.FP.Print("Chamar agora só copia o texto"); Panel.Refresh()
+        ns.FP.Print(L["textos do LFG de volta ao padrão"])
+    elseif cmd == "copiar" then db().lfgPrefill = false; ns.FP.Print(L["Chamar agora só copia o texto"]); Panel.Refresh()
     else
-        ns.FP.Print("/fp lfg [texto <t> | solo <t> | padrao | copiar]. Campos: {classe} {nivel} {papel} {atividade}")
+        ns.FP.Print(L["/fp lfg [texto <t> | solo <t> | padrao | copiar]. Campos: {classe} {nivel} {papel} {atividade}"])
     end
 end
 

@@ -2,6 +2,7 @@
 -- Junta QuestieDB, LFG do jogo, Content/Dungeons.lua e o que o jogo aprendeu, e passa para o
 -- núcleo puro (Dungeons.lua). A UI (aba Level, mapa, LFG, /fp masmorras) lê daqui.
 local _, ns = ...
+local L = ns.L -- spec 066
 local DG = {}
 ns.DungeonGuide = DG
 
@@ -67,13 +68,13 @@ end
 local acts
 local function lfgActivities()
     if acts and #acts > 0 then return acts end
-    local L = _G.C_LFGList
-    if not (L and L.GetAvailableActivities and L.GetActivityInfoTable) then return {} end
-    local ok, ids = pcall(L.GetAvailableActivities, DUNGEON_CATEGORY)
+    local lvl = _G.C_LFGList
+    if not (lvl and lvl.GetAvailableActivities and lvl.GetActivityInfoTable) then return {} end
+    local ok, ids = pcall(lvl.GetAvailableActivities, DUNGEON_CATEGORY)
     if not (ok and type(ids) == "table") then return {} end
     local out = {}
     for _, id in ipairs(ids) do
-        local okI, a = pcall(L.GetActivityInfoTable, id)
+        local okI, a = pcall(lvl.GetActivityInfoTable, id)
         if okI and a and a.fullName and not ns.Util.IsSecret(a.fullName) then
             out[#out + 1] = { id = id, name = a.fullName, minLevel = a.minLevel,
                 minLevelSuggestion = a.minLevelSuggestion, maxLevelSuggestion = a.maxLevelSuggestion,
@@ -143,12 +144,12 @@ function DG.AttuneText(d)
 end
 
 -- Faixa colorida da atividade (dado do jogo, sem "est.").
-function DG.Range(d, L)
+function DG.Range(d, lvl)
     local a = d and (d.best or d.act)
     if not (a and a.maxLevelSuggestion and a.maxLevelSuggestion > 0) then return "|cFF888888faixa ?|r" end
     local lo, hi = a.minLevelSuggestion or a.minLevel or 0, a.maxLevelSuggestion
     local colors = { red = "FF1919", yellow = "FFD100", green = "40C040", gray = "808080" }
-    return ("|cFF%s%s|r"):format(colors[ns.Zones.LevelColor(lo, hi, L or UnitLevel("player"))] or "FFFFFF",
+    return ("|cFF%s%s|r"):format(colors[ns.Zones.LevelColor(lo, hi, lvl or UnitLevel("player"))] or "FFFFFF",
         ns.Zones.FormatRange(lo, hi))
 end
 
@@ -179,21 +180,21 @@ function DG.MapName(m)
 end
 
 function DG.Where(p)
-    if not p then return "entrada desconhecida: entre uma vez para gravar" end
+    if not p then return L["entrada desconhecida: entre uma vez para gravar"] end
     return string.format("%s %.1f, %.1f", DG.MapName(p.m), p.mx or 0, p.my or 0)
 end
 
 -- R8: seta.
 function DG.GoEntrance(d)
     local e = DG.Nearest(d)
-    if not e then FP().Print(d.name .. ": entrada desconhecida. Entre uma vez para o addon gravar.") return end
-    ns.Gps.SetTarget(e.m, e.mx, e.my, "Entrada: " .. d.name .. (e.est and " (estimativa)" or ""))
+    if not e then FP().Print(d.name .. L[": entrada desconhecida. Entre uma vez para o addon gravar."]) return end
+    ns.Gps.SetTarget(e.m, e.mx, e.my, L["Entrada: "] .. d.name .. (e.est and L[" (estimativa)"] or ""))
 end
 
 function DG.GoStone(d)
     local s = d.stone
-    if not s then FP().Print(d.name .. ": nenhuma meeting stone perto da entrada.") return end
-    ns.Gps.SetTarget(s.m, s.mx, s.my, "Meeting stone: " .. d.name)
+    if not s then FP().Print(d.name .. L[": nenhuma meeting stone perto da entrada."]) return end
+    ns.Gps.SetTarget(s.m, s.mx, s.my, L["Meeting stone: "] .. d.name)
 end
 
 function DG.GoAttune(d)
@@ -204,8 +205,8 @@ function DG.GoAttune(d)
         local pts = ns.Data.SpawnPoints(ns.Data.N.spawns(step.npc), step.npc)
         if pts[1] then m, x, y = pts[1].mapID, pts[1].x, pts[1].y end
     end
-    if not m then FP().Print("Attune de " .. d.name .. ": falta " .. step.title .. " (local desconhecido).") return end
-    ns.Gps.SetTarget(m, x, y, "Attune: " .. step.title)
+    if not m then FP().Print(L["Attune de "] .. d.name .. L[": falta "] .. step.title .. L[" (local desconhecido)."]) return end
+    ns.Gps.SetTarget(m, x, y, L["Attune: "] .. step.title)
 end
 
 -- R5: aprendizado ao entrar na instância.
@@ -232,7 +233,7 @@ end
 ns.FP.On("READY", function()
     local loc = _G.GetLocale and _G.GetLocale()
     if loc and loc ~= "enUS" then -- R12
-        FP().Print("masmorras: o casamento é pelo nome em inglês; com o cliente em " .. loc .. " a lista pode ficar vazia.")
+        FP().Print(L["masmorras: o casamento é pelo nome em inglês; com o cliente em "] .. loc .. L[" a lista pode ficar vazia."])
     end
     if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(LEARN_EVERY, function()
         local ok, err = pcall(learnTick)
@@ -252,25 +253,25 @@ function DG.PrintList(zoneOnly)
     else
         list = DG.ForPlayer()
     end
-    if not DG.List() then FP().Print("dados da QuestieDB ainda carregando.") return end
+    if not DG.List() then FP().Print(L["dados da QuestieDB ainda carregando."]) return end
     if #list == 0 then
-        FP().Print(zoneOnly and "nenhuma masmorra neste mapa." or "nenhuma masmorra para o seu nível agora.")
+        FP().Print(zoneOnly and L["nenhuma masmorra neste mapa."] or L["nenhuma masmorra para o seu nível agora."])
         return
     end
-    local L = UnitLevel("player")
+    local lvl = UnitLevel("player")
     local okQ, quests = pcall(ns.Guide.DungeonQuests)
     if not okQ then quests = {} end
     for _, d in ipairs(list) do
         local e = DG.Nearest(d)
-        FP().Print(string.format("%s  %s  · %s%s", d.name, DG.Range(d, L), DG.Where(e), e and e.est and " (estimativa)" or ""))
-        if d.stone then FP().Print("    meeting stone: " .. DG.Where(d.stone)) end
+        FP().Print(string.format("%s  %s  · %s%s", d.name, DG.Range(d, lvl), DG.Where(e), e and e.est and L[" (estimativa)"] or ""))
+        if d.stone then FP().Print(L["    meeting stone: "] .. DG.Where(d.stone)) end
         local at = DG.AttuneText(d)
         if at then FP().Print("    " .. at) end
         local mine = quests[d.key] -- spec 054, R4
         if mine then
             local names = {}
-            for _, mq in ipairs(mine) do names[#names + 1] = mq.name .. (mq.skipped and " (pulada)" or "") end
-            FP().Print("    |cFFFFD100suas quests:|r " .. table.concat(names, ", "))
+            for _, mq in ipairs(mine) do names[#names + 1] = mq.name .. (mq.skipped and L[" (pulada)"] or "") end
+            FP().Print(L["    |cFFFFD100suas quests:|r "] .. table.concat(names, ", "))
         end
     end
 end
@@ -280,7 +281,7 @@ function DG.ClearLearned()
     for k in pairs(W) do W[k] = nil end
     DG.Invalidate()
     FP().Fire("DUNGEONS")
-    FP().Print("entradas de masmorra aprendidas apagadas.")
+    FP().Print(L["entradas de masmorra aprendidas apagadas."])
 end
 
 DG.db = db

@@ -1,9 +1,9 @@
 ## Interface: 16001
 ## Title: |cFF9482C9Forever|r Planner
-## Notes: Planejador de quests por zona para leveling no WoW: Forever (guia por hub, XP/hora com XP de mob), com GPS, macros e builds.
+## Notes: Zone quest planner for leveling in WoW: Forever (hub guide, XP/hour with mob XP), with GPS, macros and builds.
 ## Notes-ptBR: Planejador de quests por zona para leveling no WoW: Forever (guia por hub, XP/hora com XP de mob), com GPS, macros e builds.
 ## Author: Calcifer Fallingstar
-## Version: 0.13.0
+## Version: 0.14.0
 ## Category: Quests
 ## Dependencies: QuestieDB
 ## OptionalDeps: TomTom
@@ -14,6 +14,8 @@
 ## X-License: GPL-3.0 (usa dados da QuestieDB, GPL-3.0)
 ## X-Website: https://github.com/calucipher/forever_planner
 
+Locale.lua
+Locales\enUS.lua
 Util.lua
 Core.lua
 Weights.lua

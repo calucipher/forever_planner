@@ -2,6 +2,7 @@
 -- Frames do addon sobre o canvas do mapa, como UI/DungeonPins.lua: sem data provider da Blizzard
 -- (sem taint). Atualiza na troca de mapa e, com o mapa aberto, no máximo 5 vezes por segundo.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Pins = {}
 ns.FlightPins = Pins
 
@@ -23,15 +24,15 @@ local function showTip(pin)
     local p = pin.data
     if not p then return end
     GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(p.name or "Ponto de voo", 1, 1, 1)
+    GameTooltip:AddLine(p.name or L["Ponto de voo"], 1, 1, 1)
     if p.known then
-        GameTooltip:AddLine("Descoberto", 0.45, 0.9, 0.35)
+        GameTooltip:AddLine(L["Descoberto"], 0.45, 0.9, 0.35)
     elseif p.known == nil then
-        GameTooltip:AddLine("Abra um mestre de voo neste continente para o addon conferir", 1, 0.85, 0.2, true)
+        GameTooltip:AddLine(L["Abra um mestre de voo neste continente para o addon conferir"], 1, 0.85, 0.2, true)
     else
-        GameTooltip:AddLine("Ainda não descoberto: fale com o mestre de voo para abrir", 1, 0.35, 0.35, true)
+        GameTooltip:AddLine(L["Ainda não descoberto: fale com o mestre de voo para abrir"], 1, 0.35, 0.35, true)
     end
-    GameTooltip:AddLine("Clique: seta até aqui", 0.6, 0.6, 0.7)
+    GameTooltip:AddLine(L["Clique: seta até aqui"], 0.6, 0.6, 0.7)
     GameTooltip:Show()
 end
 
@@ -45,7 +46,7 @@ local function acquire(canvas, i)
         pin:SetScript("OnLeave", function() GameTooltip:Hide() end)
         pin:SetScript("OnClick", function(self)
             local p = self.data
-            if p then ns.Gps.SetTarget(p.mapID, p.x, p.y, "Ponto de voo: " .. tostring(p.name)) end
+            if p then ns.Gps.SetTarget(p.mapID, p.x, p.y, L["Ponto de voo: "] .. tostring(p.name)) end
         end)
         pool[i] = pin
     end
@@ -121,7 +122,7 @@ function Pins.Diag()
     local map = _G.WorldMapFrame
     local mapID = (map and map:IsShown() and map:GetMapID()) or (ns.Guide and ns.Guide.ZoneMap(C_Map.GetBestMapForUnit("player")))
     local T, E = _G.C_TaxiMap, _G.Enum
-    if not (mapID and T and T.GetTaxiNodesForMap and E and E.FlightPathFaction) then ns.FP.Print("sem a API de voo agora."); return end
+    if not (mapID and T and T.GetTaxiNodesForMap and E and E.FlightPathFaction) then ns.FP.Print(L["sem a API de voo agora."]); return end
     local ok, raw = pcall(T.GetTaxiNodesForMap, mapID)
     if not ok or type(raw) ~= "table" then ns.FP.Print("GetTaxiNodesForMap falhou: " .. tostring(raw)); return end
     local info = C_Map.GetMapInfo(mapID)
@@ -191,13 +192,13 @@ local function markDestination()
             glow:SetSize(44, 44)
         end
         glow:SetParent(button:GetParent()); glow:ClearAllPoints(); glow:SetPoint("CENTER", button); glow:Show()
-        ns.FP.Print("voo marcado: " .. names[idx])
+        ns.FP.Print(L["voo marcado: "] .. names[idx])
     end
     if db.taxiAuto == true and _G.TakeTaxiNode then
         C_Timer.After(0.5, function()
             local frame = _G.TaxiFrame
             if not (frame and frame:IsShown()) or _G.TaxiNodeName(idx) ~= names[idx] then return end -- parecer
-            ns.FP.Print("voando para " .. names[idx])
+            ns.FP.Print(L["voando para "] .. names[idx])
             _G.TakeTaxiNode(idx)
         end)
     end

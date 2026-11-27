@@ -1,6 +1,7 @@
 -- Zones.lua: regras puras da sugestão de zona (spec 029). Sem API do jogo nem db: tudo chega
 -- por parâmetro. A mesma regra roda em tools/pesquisa_zonas.lua (R23).
 local _, ns = ...
+local L = ns and ns.L or setmetatable({}, { __index = function(_, k) return k end }) -- spec 066 (o arquivo também roda sozinho)
 ns = ns or {}
 local Zones = {}
 ns.Zones = Zones
@@ -37,16 +38,16 @@ end
 
 -- XP/h de grind no nível L. hist = { [nível] = spawns } de mobs normais.
 -- p = { perKill, factor, minSpawns }. Devolve XP/h e spawns contados.
-function Zones.GrindRate(hist, L, p)
+function Zones.GrindRate(hist, lvl, p)
     local spawns, xp, secs = 0, 0, 0
     for l, s in pairs(hist or {}) do
-        local x = ns.Leveling.MobXP(L, l, p.factor or 1)
-        local inRange = l <= L + 2
-        if p.easy then inRange = l >= L - 4 and l <= L - 2 end -- spec 063, R3: modo fácil
+        local x = ns.Leveling.MobXP(lvl, l, p.factor or 1)
+        local inRange = l <= lvl + 2
+        if p.easy then inRange = l >= lvl - 4 and l <= lvl - 2 end -- spec 063, R3: modo fácil
         if x > 0 and inRange then
             spawns = spawns + s
             xp = xp + x * s
-            secs = secs + s * p.perKill * ns.Leveling.KillFactor(l, L) -- spec 063, R1
+            secs = secs + s * ns.Leveling.KillSecondsFor(p.killCurve, p.perKill, l, lvl) -- spec 063, R1; 067, R7
         end
     end
     if spawns < (p.minSpawns or 0) or secs <= 0 then return 0, spawns end
@@ -74,7 +75,7 @@ end
 -- XP que q destrava na zona: filhos solo, não feitos, de nível até L+4, sem repetir.
 -- g = { children = { [q] = {filhos} }, info = { [q] = { zone, solo, level, xp } } }.
 -- seen é opcional: passado entre chamadas, a soma de várias quests não conta duas vezes.
-function Zones.ChainAhead(q, g, zone, L, done, seen, stack)
+function Zones.ChainAhead(q, g, zone, lvl, done, seen, stack)
     seen, stack = seen or {}, stack or {}
     if stack[q] then return 0 end
     stack[q] = true
@@ -82,9 +83,9 @@ function Zones.ChainAhead(q, g, zone, L, done, seen, stack)
     local total = 0
     for _, c in ipairs(g.children[q] or {}) do
         local ci = g.info[c]
-        if ci and ci.solo and ci.zone == zone and not (done and done[c]) and not seen[c] and ci.level <= L + 4 then
+        if ci and ci.solo and ci.zone == zone and not (done and done[c]) and not seen[c] and ci.level <= lvl + 4 then
             seen[c] = true
-            total = total + (ci.xp or 0) + Zones.ChainAhead(c, g, zone, L, done, seen, stack)
+            total = total + (ci.xp or 0) + Zones.ChainAhead(c, g, zone, lvl, done, seen, stack)
         end
     end
     stack[q] = nil
@@ -143,16 +144,16 @@ function Zones.Decide(cur, cands, grind, p)
         if c.zone ~= cur.zone and (not best or c.eff > best.eff) then best = c end
     end
     if (cur.n or 0) > 0 and (not best or cur.rate >= (p.stay or 0) * best.eff) then
-        return { action = "stay", zone = cur.zone, reason = ("a zona ainda rende %s XP/h"):format(fmt(cur.rate)) }
+        return { action = "stay", zone = cur.zone, reason = (L["a zona ainda rende %s XP/h"]):format(fmt(cur.rate)) }
     end
     local grindRate = grind and grind.rate or 0
     if best and best.raw >= grindRate then
-        local why = (cur.n or 0) == 0 and "acabaram as quests do nível"
-            or ("rende mais: %s contra %s XP/h"):format(fmt(best.eff), fmt(cur.rate))
+        local why = (cur.n or 0) == 0 and L["acabaram as quests do nível"]
+            or (L["rende mais: %s contra %s XP/h"]):format(fmt(best.eff), fmt(cur.rate))
         return { action = "go", zone = best.zone, reason = why }
     end
-    local why = best and ("grind rende mais que viajar (%s contra %s XP/h)"):format(fmt(grindRate), fmt(best.raw))
-        or "nenhuma quest disponível"
+    local why = best and (L["grind rende mais que viajar (%s contra %s XP/h)"]):format(fmt(grindRate), fmt(best.raw))
+        or L["nenhuma quest disponível"]
     return { action = "grind", zone = grind and grind.zone, reason = why }
 end
 
@@ -194,10 +195,10 @@ function Zones.LevelRange(hist, questLevels, minSpawns)
 end
 
 -- R2: cor da faixa para o nível L.
-function Zones.LevelColor(lo, hi, L)
-    if ns.Leveling.MobXP(L, hi, 1) <= 0 then return "gray" end
-    if lo > L + 1 then return "red" end
-    if L <= hi then return "yellow" end
+function Zones.LevelColor(lo, hi, lvl)
+    if ns.Leveling.MobXP(lvl, hi, 1) <= 0 then return "gray" end
+    if lo > lvl + 1 then return "red" end
+    if lvl <= hi then return "yellow" end
     return "green"
 end
 
@@ -208,8 +209,8 @@ function Zones.FormatRange(lo, hi)
 end
 
 local RANGE_COLORS = { red = "FF1919", yellow = "FFD100", green = "40C040", gray = "808080" }
-function Zones.RangeLabel(lo, hi, L)
-    return ("|cFF%sníveis %s (est.)|r"):format(RANGE_COLORS[Zones.LevelColor(lo, hi, L)], Zones.FormatRange(lo, hi))
+function Zones.RangeLabel(lo, hi, lvl)
+    return ("|cFF%sníveis %s (est.)|r"):format(RANGE_COLORS[Zones.LevelColor(lo, hi, lvl)], Zones.FormatRange(lo, hi))
 end
 
 -- Spec 035, R6: zonas vizinhas (divisa a pé), simétrico. neighbors = { [zona] = { vizinhas } }.
@@ -246,8 +247,8 @@ end
 -- Trilha por faixa de nível (spec 047)
 ------------------------------------------------------------------------------------------
 -- R1: faixa de 10 em 10 (1–10, 11–20, ..., 51–60) que contém L.
-function Zones.Bracket(L)
-    local lo = math.floor((math.max(L or 1, 1) - 1) / 10) * 10 + 1
+function Zones.Bracket(lvl)
+    local lo = math.floor((math.max(lvl or 1, 1) - 1) / 10) * 10 + 1
     lo = math.min(lo, 51)
     return lo, lo + 9
 end

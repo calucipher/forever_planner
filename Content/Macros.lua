@@ -6,6 +6,7 @@
 -- IDs do Classic (rank 1). ID, nome `en` e `level` conferidos nas DB2 do cliente do Forever
 -- (build 1.60.1.70862, 07/11/2026, tools/check_content.py). No jogo: /fp macros.
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local Macros = {}
 ns.Macros = Macros
 
@@ -57,7 +58,7 @@ Macros.spells = {
     rejuvenation = { id = 774, level = 4, en = "Rejuvenation" },
 }
 
-Macros.categories = { "Leveling", "Avançadas" }
+Macros.categories = { "Leveling", K("Avançadas") }
 
 -- Linhas do modelo:
 --   { "tip", chave? }        #showtooltip (com o feitiço, se conhecido)
@@ -81,78 +82,78 @@ Macros.classes = {
         { name = "FP Rotacao", cat = "Leveling", requires = "shadowBolt",
           lines = { TIP, AUTO, { "raw", "/petattack" },
               { "seq", { "agony", "corruption", "immolate", "siphon", "shadowBolt", "shadowBolt" } } },
-          desc = "Spam: pet ataca, Agony, Corruption, Immolate, Siphon Life, 2 Shadow Bolts e recomeça." },
+          desc = K("Spam: pet ataca, Agony, Corruption, Immolate, Siphon Life, 2 Shadow Bolts e recomeça.") },
         { name = "FP Tap", cat = "Leveling", requires = "lifeTap", noRepeat = true,
           lines = { { "tip", "lifeTap" }, { "cast", "lifeTap" } },
-          desc = "Life Tap: vida vira mana. Use com vida alta; recupere a vida com Drain Life." },
+          desc = K("Life Tap: vida vira mana. Use com vida alta; recupere a vida com Drain Life.") },
         { name = "FP Corrup", cat = "Leveling", requires = "corruption",
           lines = { { "tip", "corruption" }, { "mo", "corruption" } },
-          desc = "Corruption no mouseover (sem trocar de alvo); sem mouseover, no alvo." },
+          desc = K("Corruption no mouseover (sem trocar de alvo); sem mouseover, no alvo.") },
         { name = "FP Agony", cat = "Leveling", requires = "agony",
           lines = { { "tip", "agony" }, { "mo", "agony" } },
-          desc = "Agony (Bane ou Curse) no mouseover; sem mouseover, no alvo." },
+          desc = K("Agony (Bane ou Curse) no mouseover; sem mouseover, no alvo.") },
         { name = "FP Dreno", cat = "Leveling", requires = "drainLife", noRepeat = true,
           lines = { { "tip", "drainLife" }, AUTO, { "mo", "drainLife" } },
-          desc = "Drain Life no mouseover ou no alvo (drain tanking). Canalizado: aperte uma vez." },
+          desc = K("Drain Life no mouseover ou no alvo (drain tanking). Canalizado: aperte uma vez.") },
         { name = "FP Varinha", cat = "Leveling", requires = "shoot", noRepeat = true,
           lines = { { "tip", "shoot" }, AUTO, { "raw", "/petattack" }, { "bang", "shoot" } },
-          desc = "Pet ataca e liga a varinha sem desligar se apertar de novo." },
-        { name = "FP Fear", cat = "Avançadas", requires = "fear", noRepeat = true,
+          desc = K("Pet ataca e liga a varinha sem desligar se apertar de novo.") },
+        { name = "FP Fear", cat = K("Avançadas"), requires = "fear", noRepeat = true,
           lines = { { "tip", "fear" }, { "mofocus", "fear" } },
-          desc = "Fear no mouseover, no foco ou no alvo: tira o segundo mob da luta." },
-        { name = "FP Shard", cat = "Avançadas", requires = "drainSoul", noRepeat = true,
+          desc = K("Fear no mouseover, no foco ou no alvo: tira o segundo mob da luta.") },
+        { name = "FP Shard", cat = K("Avançadas"), requires = "drainSoul", noRepeat = true,
           lines = { { "tip", "drainSoul" }, AUTO, { "cast", "drainSoul" } },
-          desc = "Drain Soul no fim do mob para ganhar Soul Shard. Canalizado: aperte uma vez." },
+          desc = K("Drain Soul no fim do mob para ganhar Soul Shard. Canalizado: aperte uma vez.") },
     },
     WARRIOR = {
         { name = "FP Guerreiro", cat = "Leveling", requires = "heroicStrike",
           lines = { TIP, AUTO, { "raw", "/startattack" }, { "cast", "charge", "[nocombat]" },
               { "cast", "execute" }, { "cast", "overpower" }, { "cast", "heroicStrike" } },
-          desc = "Spam: Charge fora de combate, Execute e Overpower quando dá, Heroic Strike na próxima pancada." },
-        { name = "FP AoE", cat = "Avançadas", requires = "thunderClap",
+          desc = K("Spam: Charge fora de combate, Execute e Overpower quando dá, Heroic Strike na próxima pancada.") },
+        { name = "FP AoE", cat = K("Avançadas"), requires = "thunderClap",
           lines = { TIP, { "raw", "/startattack" }, { "cast", "thunderClap" }, { "cast", "cleave" } },
-          desc = "Pull de vários: Thunder Clap quando sai do cooldown, Cleave na próxima pancada." },
-        { name = "FP Avancado", cat = "Avançadas", requires = "heroicStrike",
+          desc = K("Pull de vários: Thunder Clap quando sai do cooldown, Cleave na próxima pancada.") },
+        { name = "FP Avancado", cat = K("Avançadas"), requires = "heroicStrike",
           lines = { TIP, AUTO, { "raw", "/startattack" }, { "cast", "execute" }, { "cast", "overpower" },
               { "cast", "mortalStrike" }, { "cast", "bloodthirst" }, { "cast", "whirlwind" }, { "cast", "heroicStrike" } },
-          desc = "Prioridade de nível alto: Execute > Overpower > Mortal Strike/Bloodthirst > Whirlwind, Heroic Strike." },
+          desc = K("Prioridade de nível alto: Execute > Overpower > Mortal Strike/Bloodthirst > Whirlwind, Heroic Strike.") },
     },
     MAGE = {
         { name = "FP Mago", cat = "Leveling", requires = "fireball",
           lines = { TIP, AUTO, { "seq", { { "frostbolt", "fireball" }, { "frostbolt", "fireball" },
               { "frostbolt", "fireball" }, "fireBlast" } } },
-          desc = "Spam: 3 Frostbolts (ou Fireball no começo) e Fire Blast para finalizar." },
+          desc = K("Spam: 3 Frostbolts (ou Fireball no começo) e Fire Blast para finalizar.") },
         { name = "FP Varinha", cat = "Leveling", requires = "shoot", noRepeat = true,
           lines = { { "tip", "shoot" }, AUTO, { "bang", "shoot" } },
-          desc = "Liga a varinha sem desligar se apertar de novo (sem mana)." },
-        { name = "FP AoE", cat = "Avançadas", requires = "arcaneExplosion",
+          desc = K("Liga a varinha sem desligar se apertar de novo (sem mana).") },
+        { name = "FP AoE", cat = K("Avançadas"), requires = "arcaneExplosion",
           lines = { TIP, { "cast", "frostNova" }, { "cast", "arcaneExplosion" } },
-          desc = "AoE de pull grande: Frost Nova quando sai do cooldown, depois Arcane Explosion." },
-        { name = "FP Avancado", cat = "Avançadas", requires = "fireball",
+          desc = K("AoE de pull grande: Frost Nova quando sai do cooldown, depois Arcane Explosion.") },
+        { name = "FP Avancado", cat = K("Avançadas"), requires = "fireball",
           lines = { TIP, AUTO, { "cast", "fireBlast" }, { "cast", "frostbolt" }, { "cast", "fireball" } },
-          desc = "Prioridade: Fire Blast quando sai do cooldown, senão Frostbolt (ou Fireball)." },
-        { name = "FP Poly", cat = "Avançadas", requires = "polymorph", noRepeat = true,
+          desc = K("Prioridade: Fire Blast quando sai do cooldown, senão Frostbolt (ou Fireball).") },
+        { name = "FP Poly", cat = K("Avançadas"), requires = "polymorph", noRepeat = true,
           lines = { { "tip", "polymorph" }, { "mofocus", "polymorph" } },
-          desc = "Polymorph no mouseover, no foco ou no alvo: tira o segundo mob da luta." },
+          desc = K("Polymorph no mouseover, no foco ou no alvo: tira o segundo mob da luta.") },
     },
     DRUID = {
         { name = "FP Druida", cat = "Leveling", requires = "wrath",
           lines = { TIP, AUTO, { "seq", { "moonfire", "wrath", "wrath", "wrath" } } },
-          desc = "Spam de caster (1-10): Moonfire e 3 Wraths." },
+          desc = K("Spam de caster (1-10): Moonfire e 3 Wraths.") },
         { name = "FP Urso", cat = "Leveling", requires = "bearForm",
           lines = { { "tip", "maul" }, { "bang", "bearForm" }, AUTO, { "raw", "/startattack" }, { "cast", "maul" } },
-          desc = "Entra em urso (sem desfazer no spam), ataca e Maul na próxima pancada." },
+          desc = K("Entra em urso (sem desfazer no spam), ataca e Maul na próxima pancada.") },
         { name = "FP Gato", cat = "Leveling", requires = "catForm",
           lines = { TIP, { "bang", "catForm" }, AUTO, { "raw", "/startattack" },
               { "seq", { "rake", "claw", "claw", "claw", { "ferociousBite", "rip" } } } },
-          desc = "Entra em gato, Rake, 3 Claws e finaliza com Ferocious Bite (ou Rip antes do 32)." },
-        { name = "FP Urso AoE", cat = "Avançadas", requires = "swipe",
+          desc = K("Entra em gato, Rake, 3 Claws e finaliza com Ferocious Bite (ou Rip antes do 32).") },
+        { name = "FP Urso AoE", cat = K("Avançadas"), requires = "swipe",
           lines = { { "tip", "swipe" }, { "bang", "bearForm" }, { "raw", "/startattack" }, { "cast", "swipe" },
               { "cast", "maul" } },
-          desc = "Pull de vários em urso: Swipe e Maul na próxima pancada." },
-        { name = "FP Cura", cat = "Avançadas", requires = "rejuvenation", noRepeat = true,
+          desc = K("Pull de vários em urso: Swipe e Maul na próxima pancada.") },
+        { name = "FP Cura", cat = K("Avançadas"), requires = "rejuvenation", noRepeat = true,
           lines = { { "tip", "rejuvenation" }, { "raw", "/cancelform" }, { "self", "rejuvenation" } },
-          desc = "Sai da forma e põe Rejuvenation em você. Aperte uma vez." },
+          desc = K("Sai da forma e põe Rejuvenation em você. Aperte uma vez.") },
     },
 }
 
@@ -259,27 +260,27 @@ end
 function Macros.Build(m) return Macros.Compose(m, Macros.KnownNames()) end
 
 function Macros.WhyText(why)
-    if why.tooLong then return string.format("texto com %d caracteres (máximo %d)", why.length, MAX_BODY) end
+    if why.tooLong then return string.format(L["texto com %d caracteres (máximo %d)"], why.length, MAX_BODY) end
     local s = Macros.spells[why.missing]
-    return string.format("libera no nível %d (%s)", why.level, s and s.en or why.missing)
+    return string.format(L["libera no nível %d (%s)"], why.level, s and s.en or why.missing)
 end
 
 -- Cria ou atualiza a macro (personagem). Proibido em combate.
 function Macros.Install(m)
-    if InCombatLockdown() then ns.FP.Print("saia do combate para criar macros."); return false end
+    if InCombatLockdown() then ns.FP.Print(L["saia do combate para criar macros."]); return false end
     local body, why = Macros.Build(m)
     if not body then ns.FP.Print(m.name .. ":", Macros.WhyText(why)); return false end
     local idx = GetMacroIndexByName(m.name)
     if idx and idx > 0 then
         EditMacro(idx, m.name, ICON, body)
-        ns.FP.Print("macro atualizada:", m.name)
+        ns.FP.Print(L["macro atualizada:"], m.name)
         return true
     end
     local _, numChar = GetNumMacros()
-    if numChar >= (MAX_CHARACTER_MACROS or 18) then ns.FP.Print("sem espaço para macros de personagem."); return false end
+    if numChar >= (MAX_CHARACTER_MACROS or 18) then ns.FP.Print(L["sem espaço para macros de personagem."]); return false end
     local ok, err = pcall(CreateMacro, m.name, ICON, body, true)
-    if not ok then ns.FP.Print("não deu pra criar:", err); return false end
-    ns.FP.Print("macro criada:", m.name, "- arraste da janela /macro para a barra.")
+    if not ok then ns.FP.Print(L["não deu pra criar:"], err); return false end
+    ns.FP.Print(L["macro criada:"], m.name, L["- arraste da janela /macro para a barra."])
     return true
 end
 
@@ -302,7 +303,7 @@ function Macros.RefreshInstalled()
             end
         end
     end
-    if #updated > 0 then ns.FP.Print("macros atualizadas com o feitiço novo:", table.concat(updated, ", ")) end
+    if #updated > 0 then ns.FP.Print(L["macros atualizadas com o feitiço novo:"], table.concat(updated, ", ")) end
 end
 
 ns.FP.On("SPELLS", function() ns.FP.AfterCombat("macrosRefresh", Macros.RefreshInstalled) end)

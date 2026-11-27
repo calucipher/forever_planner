@@ -1,5 +1,6 @@
 -- Data.lua: camada sobre a QuestieDB (GPL-3.0). Quests, spawns, zonas, XP e recompensas.
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local Util = ns.Util
 local Data = {}
 ns.Data = Data
@@ -61,16 +62,16 @@ function Data.StartsQuest(kind, id, q)
 end
 
 function Data.Init()
-    local L = _G.LibQuestieDB
-    if not L then return false, "QuestieDB não está instalado/ativo. Instale a versão Forever." end
-    if L.RequireContract then
-        local ok, msg = L.RequireContract(4)
+    local lvl = _G.LibQuestieDB
+    if not lvl then return false, L["QuestieDB não está instalado/ativo. Instale a versão Forever."] end
+    if lvl.RequireContract then
+        local ok, msg = lvl.RequireContract(4)
         if not ok then return false, msg end
     end
-    Data.L, Data.N, Data.I, Data.O = L, L.Npc, L.Item, L.Object
-    Data.Q = Data.WithBookStarters(Data.WithFixes(L.Quest, ns.QuestFixes), L.Item)
+    Data.L, Data.N, Data.I, Data.O = lvl, lvl.Npc, lvl.Item, lvl.Object
+    Data.Q = Data.WithBookStarters(Data.WithFixes(lvl.Quest, ns.QuestFixes), lvl.Item)
 
-    local zdb = L.Support.Get("ZoneDB") or {}
+    local zdb = lvl.Support.Get("ZoneDB") or {}
     local priv = zdb.private or {}
     Data.areaToMap = loadZoneTable(priv.areaIdToUiMapId)
     for k, v in pairs(loadZoneTable(priv.areaIdToUiMapIdOverride)) do Data.areaToMap[k] = v end
@@ -79,15 +80,15 @@ function Data.Init()
     Data.dungeons = priv.dungeons or {}
     Data.subToParent = loadZoneTable(priv.subZoneToParentZone) -- spec 029, R6
     for k, v in pairs(loadZoneTable(priv.subZoneToParentZoneOverride)) do Data.subToParent[k] = v end
-    Data.factionTemplate = (L.Support.Get("QuestieDB") or {}).factionTemplate or {} -- spec 029, R7
+    Data.factionTemplate = (lvl.Support.Get("QuestieDB") or {}).factionTemplate or {} -- spec 029, R7
 
-    local xp = L.Support.Get("QuestXP")
+    local xp = lvl.Support.Get("QuestXP")
     Data.baseXP = (xp and xp.db) or {}
 
     local _, _, raceID = UnitRace("player")
     local _, classToken = UnitClass("player")
-    Data.raceMask = L.Enum.raceMaskById and L.Enum.raceMaskById[raceID]
-    Data.classMask = L.Enum.classKeys and L.Enum.classKeys[classToken]
+    Data.raceMask = lvl.Enum.raceMaskById and lvl.Enum.raceMaskById[raceID]
+    Data.classMask = lvl.Enum.classKeys and lvl.Enum.classKeys[classToken]
     Data.BuildMedianXP()
     Data.StartRewardIndex()
     return true
@@ -356,14 +357,14 @@ function Data.TransportCandidates(faction)
         for _, id in ipairs(Data.N.GetAllIds() or {}) do
             if Data.N.subName(id) == "Zeppelin Master" then
                 local f = Data.N.friendlyToFaction(id)
-                if f ~= nil and tostring(f):find("H") then add("npc", id, Data.N.name(id), "zepelim") end
+                if f ~= nil and tostring(f):find("H") then add("npc", id, Data.N.name(id), K("zepelim")) end
             end
         end
     end
     if faction == "Alliance" and Data.O and Data.O.GetAllIds then
         for _, id in ipairs(Data.O.GetAllIds() or {}) do
             local n = Data.O.name(id)
-            if n and n:find("^Boat to ") then add("object", id, n, "barco") end
+            if n and n:find("^Boat to ") then add("object", id, n, K("barco")) end
         end
     end
     return out
@@ -767,17 +768,17 @@ local function questEntry(q, level)
     local Q = Data.Q
     local req = Q.requiredLevel(q) or 0
     local status
-    if Data.IsOnQuest(q) then status = "no log"
-    elseif Data.IsEligible(q, level) then status = "disponível"
-    elseif req > level then status = "libera no nível " .. req
-    else status = "depois de outra quest" end
+    if Data.IsOnQuest(q) then status = K("no log")
+    elseif Data.IsEligible(q, level) then status = K("disponível")
+    elseif req > level then status = L["libera no nível "] .. req
+    else status = K("depois de outra quest") end
     local starter = Data.StarterPoints(q)[1]
     local zone = Q.zoneOrSort(q) or 0
     local mapID = zone > 0 and Data.areaToMap[zone] or nil
     if not mapID then mapID = starter and starter.mapID end
     local hasPre = (Q.preQuestSingle(q) or {})[1] ~= nil or (Q.preQuestGroup(q) or {})[1] ~= nil
     local qLevel = Q.questLevel(q) or 0
-    return { q = q, name = Q.name(q) or ("Quest " .. q), level = qLevel > 0 and qLevel or req, req = req,
+    return { q = q, name = Q.name(q) or (L["Quest "] .. q), level = qLevel > 0 and qLevel or req, req = req,
         mapID = mapID, zone = zoneName(mapID), status = status, starter = starter, hasPre = hasPre }
 end
 
@@ -818,7 +819,7 @@ local function chainStep(q, level)
         completed, function(p) return stepTakeable(p, level) end)
     if not start or start == q then return nil end
     local e = questEntry(start, level)
-    if e.status == "depois de outra quest" then return nil end -- exclusiva, reputação: não ajuda
+    if e.status == K("depois de outra quest") then return nil end -- exclusiva, reputação: não ajuda
     return e
 end
 
@@ -830,7 +831,7 @@ function Data.BagQuests(level)
             local e = questEntry(q, level)
             e.item, e.itemName, e.bonus = item, Data.I.name(item), bonus or nil
             e.skipped = Data.IsBagSkipped(q)
-            if e.status == "depois de outra quest" then e.step = chainStep(q, level) end
+            if e.status == K("depois de outra quest") then e.step = chainStep(q, level) end
             out[#out + 1] = e
         end
     end
@@ -892,34 +893,34 @@ local function chainNext(id)
 end
 
 -- Passo como o circuito vê uma quest (xp, dinheiro, objetivos, masmorra), com cache por nível.
-local function chainStepInfo(id, L)
-    local key = id .. ":" .. L
+local function chainStepInfo(id, lvl)
+    local key = id .. ":" .. lvl
     if stepCache[key] then return stepCache[key] end
-    local objectives, _, dungeon = Data.Objectives(id, L, ns.FP.MobXPFactor and ns.FP.MobXPFactor() or 1)
-    local s = { id = id, xp = (Data.QuestXP(id, L)), money = Data.QuestMoney(id), objectives = objectives,
+    local objectives, _, dungeon = Data.Objectives(id, lvl, ns.FP.MobXPFactor and ns.FP.MobXPFactor() or 1)
+    local s = { id = id, xp = (Data.QuestXP(id, lvl)), money = Data.QuestMoney(id), objectives = objectives,
         dungeon = dungeon, state = "pegar", level = Data.Q.questLevel(id), done = Data.IsCompleted(id) }
     -- R1 (emenda): fora do plano (spec 023) para a busca. No nível da própria quest, cinza e alta não contam.
-    s.skip = not Data.IsRelevant(id, s.level or L)
+    s.skip = not Data.IsRelevant(id, s.level or lvl)
     stepCache[key] = s
     return s
 end
 
-local function chainParams(L)
+local function chainParams(lvl)
     local db = ns.FP.db
-    return { ttk = ns.FP.KillSeconds and ns.FP.KillSeconds() or 10, downtime = 0, goldToXP = db.goldToXP,
-        playerLevel = L, speed = db.runSpeed or 7 }
+    return { ttk = ns.FP.KillSeconds and ns.FP.KillSeconds() or 10, killCurve = ns.FP.KillCurve and ns.FP.KillCurve() or nil, downtime = 0, goldToXP = db.goldToXP,
+        playerLevel = lvl, speed = db.runSpeed or 7 }
 end
 
 -- R3: passos adiante de q no nível L, com valor e tempo. p: parâmetros do circuito (opcional).
-function Data.ChainAhead(q, L, p)
+function Data.ChainAhead(q, lvl, p)
     local group = inGroup()
-    local key = q .. ":" .. L .. ":" .. tostring(group)
+    local key = q .. ":" .. lvl .. ":" .. tostring(group)
     if chainCache[key] then return chainCache[key] end
-    local ids = ns.Leveling.ChainWalk(q, chainNext, function(id) return chainStepInfo(id, L) end, L, { group = group })
-    p = p or chainParams(L)
+    local ids = ns.Leveling.ChainWalk(q, chainNext, function(id) return chainStepInfo(id, lvl) end, lvl, { group = group })
+    p = p or chainParams(lvl)
     local value, seconds = 0, 0
     for _, id in ipairs(ids) do
-        local v, s = ns.Leveling.StepEstimate(chainStepInfo(id, L), p)
+        local v, s = ns.Leveling.StepEstimate(chainStepInfo(id, lvl), p)
         value, seconds = value + v, seconds + s
     end
     local r = { ids = ids, n = #ids, value = value, seconds = seconds }

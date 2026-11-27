@@ -2,6 +2,7 @@
 -- Pontos { cont, x, y } em jardas do mundo. O contexto (pontos de voo, transportes, pedra de lar)
 -- vem do adaptador (LevelGuide.lua).
 local _, ns = ...
+local L = ns.L -- spec 066
 local Travel = {}
 ns.Travel = Travel
 
@@ -63,7 +64,7 @@ local function plain(a, b, ctx)
     for _, t in ipairs(ctx.transports or {}) do
         if t.from.cont == a.cont and t.to.cont == b.cont then
             local ride = { seconds = ctx.boardWait + ctx.ride, steps = { { kind = "transporte",
-                seconds = ctx.boardWait + ctx.ride, label = t.label or ("transporte para " .. tostring(t.dest)),
+                seconds = ctx.boardWait + ctx.ride, label = t.label or (L["transporte para "] .. tostring(t.dest)),
                 point = t.from, mapPoint = t.mapPoint, dest = t.dest,
                 measured = isMeasured(ctx, "boardWait") and isMeasured(ctx, "ride") } } }
             local total = concat(sameContinent(a, t.from, ctx), ride, sameContinent(t.to, b, ctx))
@@ -84,12 +85,12 @@ function Travel.Plan(from, to, ctx)
         local after = plain(h.to, to, ctx)
         if after then
             local stone = { seconds = ctx.hearthSeconds, steps = { { kind = "lar", seconds = ctx.hearthSeconds,
-                label = "pedra de lar" .. (h.name and (" (" .. h.name .. ")") or ""), point = from,
+                label = L["pedra de lar"] .. (h.name and (" (" .. h.name .. ")") or ""), point = from,
                 measured = isMeasured(ctx, "hearthSeconds") } } }
             local total = concat(stone, after)
             if wait then
                 total = concat({ seconds = wait, steps = { { kind = "esperar", seconds = wait, point = from,
-                    label = string.format("espere a pedra de lar (%d min)", math.max(1, math.floor(wait / 60 + 0.5))) } } }, total)
+                    label = string.format(L["espere a pedra de lar (%d min)"], math.max(1, math.floor(wait / 60 + 0.5))) } } }, total)
             end
             -- a recarga é de cerca de 1 hora: só vale se poupar pelo menos hearthMinSave
             if not best or total.seconds + (ctx.hearthMinSave or 0) <= best.seconds then best = total end
@@ -102,15 +103,15 @@ local function minutes(s) return math.max(1, math.floor(s / 60 + 0.5)) end
 
 -- R5: texto curto do caminho.
 function Travel.Describe(plan)
-    if not plan then return "sem caminho conhecido" end
+    if not plan then return L["sem caminho conhecido"] end
     local parts = {}
     for _, s in ipairs(plan.steps) do
-        if s.kind == "voar" then parts[#parts + 1] = "voo " .. (s.label or "?")
+        if s.kind == "voar" then parts[#parts + 1] = L["voo "] .. (s.label or "?")
         elseif s.kind == "transporte" then parts[#parts + 1] = s.label or "transporte"
-        elseif s.kind == "lar" or s.kind == "esperar" then parts[#parts + 1] = s.label or "pedra de lar" end -- spec 056, R3
+        elseif s.kind == "lar" or s.kind == "esperar" then parts[#parts + 1] = s.label or L["pedra de lar"] end -- spec 056, R3
     end
-    if #parts == 0 then return string.format("a pé ~%d min", minutes(plan.seconds)) end
-    parts[#parts + 1] = string.format("~%d min", minutes(plan.seconds))
+    if #parts == 0 then return string.format(L["a pé ~%d min"], minutes(plan.seconds)) end
+    parts[#parts + 1] = string.format(L["~%d min"], minutes(plan.seconds))
     return table.concat(parts, " · ")
 end
 

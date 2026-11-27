@@ -2,6 +2,7 @@
 -- (Guide.RankMap), a oferta das outras zonas (Guide.ZoneOffer, spec 029) e a viagem real
 -- (Travel.Plan, com os pontos de voo, os transportes e a pedra de lar do jogo).
 local _, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local LevelGuide = {}
 ns.LevelGuide = LevelGuide
 
@@ -37,7 +38,7 @@ local function transports()
     for _, t in ipairs(ns.Data.TransportPoints((_G.UnitFactionGroup("player")))) do
         local from, to = world(t), world(t.arrival)
         if from and to then
-            out[#out + 1] = { from = from, to = to, dest = t.dest, label = (t.kind or "transporte") .. " para " .. tostring(t.dest),
+            out[#out + 1] = { from = from, to = to, dest = t.dest, label = L[t.kind or K("transporte")] .. L[" para "] .. tostring(t.dest),
                 mapPoint = { mapID = t.mapID, x = t.x, y = t.y } }
         end
     end
@@ -64,11 +65,11 @@ local function measured() return ns.Measured and ns.Measured.travel end
 
 -- Spec 036, R19: "(medido)" só quando todos os trechos do caminho usaram valor medido (constituição 2).
 function LevelGuide.EstLabel(plan)
-    if not (plan and plan.steps and plan.steps[1]) then return "(est.)" end
+    if not (plan and plan.steps and plan.steps[1]) then return L["(est.)"] end
     for _, s in ipairs(plan.steps) do
-        if not s.measured then return "(est.)" end
+        if not s.measured then return L["(est.)"] end
     end
-    return "(medido)"
+    return L["(medido)"]
 end
 
 function LevelGuide.TravelContext(contMaps)
@@ -185,7 +186,7 @@ local function logItems(player, pw, nearSet, ctx, nearCtx)
     for _, q in ipairs(D.LogQuests()) do
         local fin = finisherOf(q, player)
         local zone = fin and ns.Guide.MapZone(fin.mapID)
-        local it = { id = q, name = D.Q.name(q) or ("Quest " .. q), ready = D.IsReadyForTurnIn(q),
+        local it = { id = q, name = D.Q.name(q) or (L["Quest "] .. q), ready = D.IsReadyForTurnIn(q),
             qLevel = D.Q.questLevel(q), zone = zone, point = fin }
         if it.ready and zone and pw and ctx then
             local fw = world(fin)
@@ -199,9 +200,9 @@ local function logItems(player, pw, nearSet, ctx, nearCtx)
 end
 
 -- R18: a saída da Leveling.BeforeLeaving com o caminho e o ponto de entrega de volta.
-local function beforeLeaving(player, pw, L, nearSet, ctx, nearCtx)
+local function beforeLeaving(player, pw, lvl, nearSet, ctx, nearCtx)
     local items, byId = logItems(player, pw, nearSet, ctx, nearCtx)
-    local list = ns.Leveling.BeforeLeaving(items, L, nearSet)
+    local list = ns.Leveling.BeforeLeaving(items, lvl, nearSet)
     for _, e in ipairs(list) do
         local it = byId[e.id]
         if it then e.plan, e.point = it.plan, it.point end
@@ -229,13 +230,13 @@ end
 
 -- Oferta da zona no nível L (spec 029): reaproveita a da sugestão de zona quando ela é do mesmo
 -- nível e da mesma zona de partida (parecer, item 9). Devolve a oferta e o potencial.
-local function offerOf(zone, L, cat, p, adv)
+local function offerOf(zone, lvl, cat, p, adv)
     local G, Z = ns.Guide, ns.Zones
     for _, c in ipairs(adv and adv.cands or {}) do
         if c.zone == zone and c.potential then return c.offer, c.potential end
     end
-    local o = G.ZoneOffer(cat, zone, L, p)
-    local ahead = G.ZoneOffer(cat, zone, math.min(L + p.lookahead, #Z.LEVEL_XP), p)
+    local o = G.ZoneOffer(cat, zone, lvl, p)
+    local ahead = G.ZoneOffer(cat, zone, math.min(lvl + p.lookahead, #Z.LEVEL_XP), p)
     return o, math.max(o.value + o.unlock, ahead.value)
 end
 
@@ -265,17 +266,17 @@ local function hearthFor(zone)
 end
 
 -- R2–R5: a trilha da faixa de L. yield, opcional, a cada zona.
-function LevelGuide.Trail(L, yield)
+function LevelGuide.Trail(lvl, yield)
     local D, G, Z = ns.Data, ns.Guide, ns.Zones
     local cat = D.zoneCatalog
     if not (cat and D.Q and D.ready) then return nil end
     local easy = false
-    if not L then -- spec 063, R4: só o nível do personagem; o pedido à mão fica como está
-        L = UnitLevel("player")
-        easy = ns.Leveling.EasyActive(ns.FP.db.easyMode, L)
-        if easy then L = math.max(1, L - 3) end
+    if not lvl then -- spec 063, R4: só o nível do personagem; o pedido à mão fica como está
+        lvl = UnitLevel("player")
+        easy = ns.Leveling.EasyActive(ns.FP.db.easyMode, lvl)
+        if easy then lvl = math.max(1, lvl - 3) end
     end
-    local lo, hi = Z.Bracket(L)
+    local lo, hi = Z.Bracket(lvl)
     local _, hereMap = G.PlayerArea()
     local player = ns.Planner.PlayerPoint() or { mapID = hereMap }
     local pw = world(player)
@@ -309,7 +310,7 @@ function LevelGuide.Trail(L, yield)
     local current = steps[1]
     for _, st in ipairs(steps) do
         local z = st.zones[1]
-        if z.lo <= L and z.hi >= L then current = st; break end
+        if z.lo <= lvl and z.hi >= lvl then current = st; break end
     end
     local dungeons = {}
     for _, d in ipairs(ns.DungeonGuide.List() or {}) do
@@ -321,7 +322,7 @@ function LevelGuide.Trail(L, yield)
         local x, y = a.best or a.act, b.best or b.act
         return (x.minLevelSuggestion or 0) < (y.minLevelSuggestion or 0)
     end)
-    return { lo = lo, hi = hi, level = L, easy = easy, steps = steps, current = current, dungeons = dungeons,
+    return { lo = lo, hi = hi, level = lvl, easy = easy, steps = steps, current = current, dungeons = dungeons,
         hearth = current and hearthFor(current.zones[1]) or nil }
 end
 
@@ -329,7 +330,7 @@ end
 function LevelGuide.Compute(yield)
     local D, G, Z = ns.Data, ns.Guide, ns.Zones
     if not (D.Q and D.ready) then return nil end
-    local L = UnitLevel("player")
+    local lvl = UnitLevel("player")
     local here, hereMap = G.PlayerArea()
     if not here then return nil end
     local player = ns.Planner.PlayerPoint() or { mapID = hereMap }
@@ -344,16 +345,17 @@ function LevelGuide.Compute(yield)
     local ctx, nearCtx = travelContexts(hereMap) -- R4: em "Perto" a pedra nunca entra
 
     -- 1. Perto
-    local levelXP = Z.LevelXP(L)
+    local levelXP = Z.LevelXP(lvl)
     local near, all = {}, {}
     for _, zone in ipairs(zones) do
         local map = D.areaToMap[zone]
         if map then
-            for _, r in ipairs(G.RankMap(map, player, L, yield)) do
+            for _, r in ipairs(G.RankMap(map, player, lvl, yield)) do
+                local zoneRoute = r.zone == true -- spec 068 (parecer): a rota da zona repete os hubs; aqui não entra
                 r.zone = zone
-                all[#all + 1] = r
+                if not zoneRoute then all[#all + 1] = r end
                 local c = r.circuit
-                if #c.stops > 0 and countKept(c) > 0 then
+                if not zoneRoute and #c.stops > 0 and countKept(c) > 0 then
                     local hw = world(r.hub.points[1])
                     local plan = pw and hw and ns.Travel.Plan(pw, hw, nearCtx)
                     local rate = ns.Leveling.HubWorth(c.rate, (c.xp or 0) + (c.mobXP or 0), levelXP, ns.FP.db.hubMinShare) -- R16
@@ -369,7 +371,7 @@ function LevelGuide.Compute(yield)
     while #near > NEAR_MAX do table.remove(near) end
 
     -- 2. Antes de sair (só o que fica em "Perto"); 4. Volte depois
-    local before = beforeLeaving(player, pw, L, nearSet, ctx, nearCtx)
+    local before = beforeLeaving(player, pw, lvl, nearSet, ctx, nearCtx)
     local comeBack = ns.Leveling.ComeBack(all)
     while #comeBack > COMEBACK_MAX do table.remove(comeBack) end
 
@@ -378,13 +380,13 @@ function LevelGuide.Compute(yield)
     if cat and levelXP and pw then
         local p = G.ZoneParams()
         local adv = G.ZoneAdvice()
-        if not (adv and adv.level == L and adv.here == here) then adv = nil end
+        if not (adv and adv.level == lvl and adv.here == here) then adv = nil end
         local turnIns = turnInsByZone(player)
         local cands = {}
         for zone, z in pairs(cat.zones) do
             local map = D.areaToMap[zone]
             if z.continent and map and #z.quests > 0 then
-                local o, potential = offerOf(zone, L, cat, p, adv)
+                local o, potential = offerOf(zone, lvl, cat, p, adv)
                 local plan, dest
                 if o.n > 0 then
                     dest = offerHub(o, map)
@@ -408,7 +410,7 @@ function LevelGuide.Compute(yield)
         local db = ns.FP.db
         trips = Z.WorthTrip(cands, nearRate, { zoneStay = db.zoneStay, zoneMinVisit = db.zoneMinVisit, tripMax = 2 })
     end
-    return { level = L, here = here, near = near, before = before, trips = trips, comeBack = comeBack,
+    return { level = lvl, here = here, near = near, before = before, trips = trips, comeBack = comeBack,
         nearRate = nearRate }
 end
 
@@ -486,25 +488,25 @@ function LevelGuide.FollowTrip(t)
         local after = t.after or zoneName -- R20: na entrega, "entregar Quest"
         local db = ns.FP.db
         if leg and leg.kind == "esperar" then -- spec 056: esperar a pedra compensa mais que andar
-            ns.FP.Print(leg.label .. " e use; ir a pé leva mais. Depois " .. (t.questID and "use /fp entregar de novo." or ("clique de novo em " .. zoneName .. ".")))
+            ns.FP.Print(leg.label .. L[" e use; ir a pé leva mais. Depois "] .. (t.questID and L["use /fp entregar de novo."] or (L["clique de novo em "] .. zoneName .. ".")))
             return
         end
         if leg and leg.kind == "lar" then
             if t.questID then db.guide, db.following, ns.Guide.current = nil, nil, nil end -- parecer: o hub puxaria a seta
-            ns.FP.Print("use a pedra de lar (" .. tostring(leg.label) .. "); depois " .. (t.questID and "use /fp entregar de novo." or ("clique de novo em " .. zoneName .. ".")))
+            ns.FP.Print(L["use a pedra de lar ("] .. tostring(leg.label) .. L["); depois "] .. (t.questID and L["use /fp entregar de novo."] or (L["clique de novo em "] .. zoneName .. ".")))
             return
         end
         local mapID, x, y, title
         if leg and leg.kind == "voar" and leg.from and leg.from.mapID then
             mapID, x, y = leg.from.mapID, leg.from.mx, leg.from.my
-            title = "Voar: " .. leg.label .. " · depois: " .. after
+            title = L["Voar: "] .. leg.label .. L[" · depois: "] .. after
         elseif leg and leg.kind == "transporte" and leg.mapPoint then
             mapID, x, y = leg.mapPoint.mapID, leg.mapPoint.x, leg.mapPoint.y
-            title = leg.label .. " · depois: " .. after
+            title = leg.label .. L[" · depois: "] .. after
         elseif t.dest then
-            mapID, x, y, title = t.dest.mapID, t.dest.x, t.dest.y, t.questID and after or ("Ir para " .. zoneName)
+            mapID, x, y, title = t.dest.mapID, t.dest.x, t.dest.y, t.questID and after or (L["Ir para "] .. zoneName)
         end
-        if not mapID then ns.FP.Print("não achei o ponto do primeiro trecho da viagem."); return end
+        if not mapID then ns.FP.Print(L["não achei o ponto do primeiro trecho da viagem."]); return end
         -- R17: o hub e a quest seguidos puxariam a seta de volta (como em Planner.Follow).
         db.guide, db.following = nil, nil
         ns.Guide.current = nil
@@ -514,7 +516,7 @@ function LevelGuide.FollowTrip(t)
         if t.questID then
             ns.FP.Fire("FOLLOW", "entrega", t.questID) -- R20: no diário, a entrega e não "trip"
         else
-            ns.FP.Print("viagem: " .. zoneName .. " — " .. ns.Travel.Describe(t.plan) .. " " .. LevelGuide.EstLabel(t.plan))
+            ns.FP.Print(L["viagem: "] .. zoneName .. " — " .. ns.Travel.Describe(t.plan) .. " " .. LevelGuide.EstLabel(t.plan))
             ns.FP.Fire("FOLLOW", "trip", t.zone, t.eff) -- spec 036, R9
         end
         ns.FP.Fire("CHANGED")
@@ -529,11 +531,11 @@ function LevelGuide.FollowTurnIn(e, quiet)
         ns.Planner.Follow(e.id)
     else
         if not quiet then
-            ns.FP.Print(string.format("entrega de %s em %s: %s %s; na chegada, use /fp entregar", tostring(e.name),
+            ns.FP.Print(string.format(L["entrega de %s em %s: %s %s; na chegada, use /fp entregar"], tostring(e.name),
                 ns.Guide.AreaName(e.zone), ns.Travel.Describe(e.plan), LevelGuide.EstLabel(e.plan)))
         end
         LevelGuide.FollowTrip({ plan = e.plan, zone = e.zone, dest = e.point, questID = e.id,
-            after = "entregar " .. tostring(e.name) })
+            after = L["entregar "] .. tostring(e.name) })
     end
     return action
 end

@@ -1,5 +1,6 @@
 -- Auto.lua: auto accept e auto turn-in (spec 005). Os eventos chegam pelo Core ("QUEST_DIALOG").
 local _, ns = ...
+local L = ns.L -- spec 066
 local Util = ns.Util
 local Auto = {}
 ns.Auto = Auto
@@ -64,8 +65,7 @@ local function wanted(q)
         for _, p in ipairs(ns.Data.Prerequisites(q) or {}) do
             if recent[p] then
                 -- R4: continuação por pré-requisito, se não for de grupo (masmorra ou elite fica com o jogador)
-                local _, elite, dungeon = ns.Data.Objectives(q, UnitLevel("player"))
-                if not ns.Leveling.GroupKind(elite, dungeon) then set[q] = true end
+                if not ns.Guide.GroupKindOf(q) then set[q] = true end -- spec 067, R3: evento também
                 break
             end
         end
@@ -77,7 +77,7 @@ local function skipNote(q)
     q = Util.Num(q)
     if q and relevant(q) and not warned[q] then -- R5: uma vez por quest e sessão
         warned[q] = true
-        ns.FP.Print(string.format("não aceitei %s: fora do plano (aceite na mão se quiser).", ns.Data.Q.name(q) or tostring(q)))
+        ns.FP.Print(string.format(L["não aceitei %s: fora do plano (aceite na mão se quiser)."], ns.Data.Q.name(q) or tostring(q)))
     end
 end
 
@@ -123,7 +123,7 @@ local function onComplete(tries)
         return
     end
     ns.FP.Debug(string.format("auto: recompensa %d de %d", pick, n))
-    ns.FP.Print("recompensa escolhida:", choices[pick].link or pick) -- R8
+    ns.FP.Print(L["recompensa escolhida:"], choices[pick].link or pick) -- R8
     _G.GetQuestReward(pick)
 end
 
@@ -171,7 +171,7 @@ end)
 -- R7
 function Auto.Toggle()
     ns.FP.db.auto = ns.FP.db.auto == false -- spec 058: nil conta como ligado
-    ns.FP.Print(ns.FP.db.auto and "auto accept/turn-in ligado." or "auto accept/turn-in desligado.")
+    ns.FP.Print(ns.FP.db.auto and L["auto accept/turn-in ligado."] or L["auto accept/turn-in desligado."])
 end
 
 return Auto

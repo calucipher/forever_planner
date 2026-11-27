@@ -1,5 +1,6 @@
 -- UI/MainFrame.lua: janela principal com abas (Quests, Macros, Builds).
 local _, ns = ...
+local L = ns.L -- spec 066
 local Theme = ns.Theme
 local UI = { tabs = {}, order = {} }
 ns.UI = UI
@@ -58,7 +59,7 @@ local function build()
         local b = CreateFrame("Button", nil, f)
         b:SetSize(step - 4, 26); b:SetPoint("TOPLEFT", x, -52)
         b.label = Theme.Text(b, 12, Theme.c.muted)
-        b.label:SetPoint("CENTER"); b.label:SetText(tab.label)
+        b.label:SetPoint("CENTER"); b.label:SetText(ns.L[tab.label]) -- spec 066
         b.line = b:CreateTexture(nil, "ARTWORK")
         b.line:SetTexture("Interface\\Buttons\\WHITE8X8")
         b.line:SetPoint("BOTTOMLEFT"); b.line:SetPoint("BOTTOMRIGHT"); b.line:SetHeight(2)
@@ -80,13 +81,13 @@ local function build()
     f.status:SetPoint("BOTTOMLEFT", 12, 10)
     f.status:SetWidth(W - 150)
     -- Spec 014: desfaz as marcas de quest que o jogo não ofereceu.
-    local reset = Theme.Button(f, "Reativar quests", 110, 18, function()
+    local reset = Theme.Button(f, L["Reativar quests"], 110, 18, function()
         ns.Planner.ConfirmClearUnavailable("painel")
     end)
     reset:SetPoint("BOTTOMRIGHT", -10, 6)
     reset:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Desfaz as marcas de quest indisponível (pede confirmação). Não serve para atualizar: para isso, 'Recalcular rota' no menu '+'.", 1, 1, 1, true)
+        GameTooltip:AddLine(L["Desfaz as marcas de quest indisponível (pede confirmação). Não serve para atualizar: para isso, 'Recalcular rota' no menu '+'."], 1, 1, 1, true)
         GameTooltip:Show()
     end)
     reset:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -122,7 +123,7 @@ function UI.Refresh()
     if not f or not f:IsShown() then return end
     local mapID = C_Map.GetBestMapForUnit("player")
     local info = mapID and C_Map.GetMapInfo(mapID)
-    f.subtitle:SetText(string.format("%s  ·  nível %d  ·  perfil: %s",
+    f.subtitle:SetText(string.format(L["%s  ·  nível %d  ·  perfil: %s"],
         info and info.name or "?", UnitLevel("player"),
         ns.Weights.presets[ns.FP.db.preset] and ns.Weights.presets[ns.FP.db.preset].label or ns.FP.db.preset))
     local tab = UI.tabs[UI.current]

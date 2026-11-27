@@ -1,5 +1,6 @@
 -- Core.lua: SavedVariables, eventos, cache de recompensas reais e slash commands.
 local ADDON, ns = ...
+local L, K = ns.L, ns.Locale.K -- spec 066
 local Util = ns.Util
 
 local FP = {}
@@ -17,8 +18,8 @@ do
         FP.LogError(event .. ": " .. tostring(func))
         if not blockedWarned and FP.Print then
             blockedWarned = true
-            FP.Print("o jogo bloqueou a função " .. tostring(func) .. " do addon (" .. event .. "). "
-                .. "Mande isto para o suporte; /console taintLog 1 grava os detalhes em Logs/taint.log.")
+            FP.Print(L["o jogo bloqueou a função "] .. tostring(func) .. L[" do addon ("] .. event .. "). "
+                .. L["Mande isto para o suporte; /console taintLog 1 grava os detalhes em Logs/taint.log."])
         end
     end)
 end
@@ -38,7 +39,7 @@ FP.defaults = {
     flightMaxDetour = 400,      -- desvio máximo para abrir ponto de voo no circuito (spec 045, estimativa)
     flightOverhead = 10,        -- segundos para falar com o mestre de voo (spec 045, estimativa)
     grayKeepDelta = 10,         -- upgrade (pontos de score) que segura quest cinza no circuito (spec 046, estimativa)
-    calib = { xp = {}, kill = {}, danger = {} }, -- amostras reais das últimas mortes (R7) e lutas (spec 031)
+    calib = { xp = {}, kill = {}, danger = {}, killDiff = {} }, -- amostras reais das últimas mortes (R7) e lutas (spec 031)
     guide = nil,                -- hub seguido pelo GPS { map =, hub = }
     minimap = { angle = 225, hide = false }, -- botão do minimapa (spec 004)
     auto = true,                -- auto accept e auto turn-in (spec 005)
@@ -148,6 +149,17 @@ function FP.KillSeconds(minSamples)
     end
     return FP.db.ttk + (FP.db.downtime or 0)
 end
+-- Spec 067, R6: tempo do primeiro alvo até a morte, pela diferença de nível (mob − você).
+local MAX_KILL_TIME = 180
+function FP.RecordKillTime(ttk, mobLevel)
+    local lvl = UnitLevel("player")
+    if not (ttk and ttk > 0 and ttk <= MAX_KILL_TIME and mobLevel and lvl) then return end
+    FP.db.calib.killDiff = FP.db.calib.killDiff or {}
+    ns.Leveling.PushSample(FP.db.calib.killDiff, { d = ns.Leveling.KillDiff(mobLevel, lvl), s = ttk }, 200)
+end
+function FP.KillCurve() return ns.Leveling.KillCurve(FP.db.calib.killDiff, MIN_SAMPLES) end
+FP.On("KILL_TIME", function(ttk, mobLevel) FP.RecordKillTime(ttk, mobLevel) end)
+
 function FP.MobXPFactor()
     return ns.Leveling.Mean(FP.db.calib.xp, MIN_SAMPLES) or FP.db.mobXPFactor or 1
 end
@@ -176,24 +188,29 @@ function FP.GearItemLevel()
 end
 -- Tolerância de mobs altos (R4, R7): tolerância, fonte e número de amostras de luta.
 function FP.MobTolerance()
-    local L = ns.Leveling
+    local lvl = ns.Leveling
     local danger = FP.db.calib.danger or {}
-    local combat, recentDeath = L.CombatOffset(danger)
+    local combat, recentDeath = lvl.CombatOffset(danger)
     local avg = FP.GearItemLevel()
-    local source = combat and "combate" or (avg and "gear" or "padrão")
-    local tol = L.MobTolerance(L.GearOffset(avg, UnitLevel("player")), combat, recentDeath)
-    local easy = L.EasyActive(FP.db.easyMode, UnitLevel("player")) -- spec 063, R2a
-    if easy then source = "modo fácil" end
-    return L.EasyTolerance(tol, easy), source, #danger -- spec 063, R2
+    local source = combat and K("combate") or (avg and K("gear") or K("padrão"))
+    local tol = lvl.MobTolerance(lvl.GearOffset(avg, UnitLevel("player")), combat, recentDeath)
+    local easy = lvl.EasyActive(FP.db.easyMode, UnitLevel("player")) -- spec 063, R2a
+    if easy then source = K("modo fácil") end
+    return lvl.EasyTolerance(tol, easy), source, #danger -- spec 063, R2
 end
 
 -- /fp calib e o botão "Calibração" do menu + (spec 031, R9)
 function FP.PrintCalib()
-    FP.Print(string.format("tempo por morte: %.1f s (%d amostras) · fator de XP: %.2f (%d amostras)",
+    FP.Print(string.format(L["tempo por morte: %.1f s (%d amostras) · fator de XP: %.2f (%d amostras)"],
         FP.KillSeconds(), #FP.db.calib.kill, FP.MobXPFactor(), #FP.db.calib.xp))
     local tol, source, n = FP.MobTolerance()
-    FP.Print(string.format("tolerância de mobs altos: %+.1f nível (fonte: %s, %d lutas; estimativa)",
-        tol, source, n))
+    local curve, parts = FP.KillCurve(), {} -- spec 067, R7
+    for d = ns.Leveling.KILL_DIFF_MIN, ns.Leveling.KILL_DIFF_MAX do
+        if curve[d] then parts[#parts + 1] = string.format("%+d: %.0f s", d, curve[d]) end
+    end
+    if #parts > 0 then FP.Print(L["tempo por morte pelo nível do mob:"], table.concat(parts, " · ")) end
+    FP.Print(string.format(L["tolerância de mobs altos: %+.1f nível (fonte: %s, %d lutas; estimativa)"],
+        tol, ns.L[source], n))
 end
 
 -- Coleta das lutas (R8): o Core só junta os dados; a regra da amostra é Leveling.FightSample (R10).
@@ -389,6 +406,10 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" and arg1 == ADDON then
         ForeverPlannerDB = Util.CopyDefaults(FP.defaults, ForeverPlannerDB)
         FP.db = ForeverPlannerDB
+        -- Spec 066, R3: o idioma escolhido fica na conta (ForeverPlannerWorld), lido quando o SavedVariables chega
+        local W = _G.ForeverPlannerWorld
+        ns.Locale.Set(ns.Locale.Pick(_G.GetLocale and _G.GetLocale(), type(W) == "table" and W.idioma or nil))
+        ns.Locale.ready = true
         for _, msg in ipairs(earlyErrors) do FP.LogError(msg) end -- spec 036, R8a
         earlyErrors = {}
         FP.Fire("DB_READY")
@@ -400,9 +421,9 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             return
         end
         FP.Fire("READY")
-        FP.Print("pronto. |cFFFFFFFF/fp|r abre o painel, |cFFFFFFFF/fp next|r segue a melhor quest.")
+        FP.Print(L["pronto. |cFFFFFFFF/fp|r abre o painel, |cFFFFFFFF/fp next|r segue a melhor quest."])
         if #FP.missingEvents > 0 then
-            FP.Print("|cFFFFAA00eventos que não existem neste client (função ligada a eles fica parada):|r "
+            FP.Print(L["|cFFFFAA00eventos que não existem neste client (função ligada a eles fica parada):|r "]
                 .. table.concat(FP.missingEvents, ", "))
         end
     elseif event == "PLAYER_REGEN_DISABLED" then

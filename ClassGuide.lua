@@ -1,6 +1,7 @@
 -- ClassGuide.lua: adaptador dos marcos da classe (spec 011). Liga a QuestieDB (Data), o
 -- conteúdo (Content/Classes) e as regras puras (Milestones) aos avisos no chat e ao GPS.
 local _, ns = ...
+local L = ns.L -- spec 066
 local ClassGuide = {}
 ns.ClassGuide = ClassGuide
 
@@ -39,8 +40,8 @@ end
 function ClassGuide.Follow()
     ns.FP.AfterCombat("followClass", function()
         local e = ClassGuide.Best()
-        if not e then ns.FP.Print("nenhuma quest de classe disponível agora."); return end
-        ns.FP.Print(string.format("seguindo quest de classe: %s (%s) — %s", e.name, e.zone, e.status))
+        if not e then ns.FP.Print(L["nenhuma quest de classe disponível agora."]); return end
+        ns.FP.Print(string.format(L["seguindo quest de classe: %s (%s) — %s"], e.name, e.zone, e.status))
         ns.FP.Debug("classe: seguir " .. e.q)
         ns.Planner.Follow(e.q)
     end)
@@ -48,7 +49,7 @@ end
 
 function ClassGuide.PrintList()
     local list = ClassGuide.List()
-    if #list == 0 then ns.FP.Print("nenhuma quest de classe para este personagem (ou dados ainda carregando).") end
+    if #list == 0 then ns.FP.Print(L["nenhuma quest de classe para este personagem (ou dados ainda carregando)."]) end
     for _, e in ipairs(list) do
         ns.FP.Print(string.format("[%d] %s (%s) — %s", e.level, e.name, e.zone, e.status))
     end
@@ -105,9 +106,9 @@ function ClassGuide.DiagLines()
             local name, isHeader = info(i)
             if name and not isHeader then names[#names + 1] = name end
         end
-        out[#out + 1] = "linhas de perícia do jogo: " .. (#names > 0 and table.concat(names, ", ") or "nenhuma")
+        out[#out + 1] = L["linhas de perícia do jogo: "] .. (#names > 0 and table.concat(names, ", ") or "nenhuma")
     else
-        out[#out + 1] = "linhas de perícia do jogo: API ausente"
+        out[#out + 1] = L["linhas de perícia do jogo: API ausente"]
     end
     return out
 end
@@ -127,7 +128,7 @@ function ClassGuide.FollowTrainer(key)
         end
     end
     local best = M.PickTrainer(options)
-    if not best then ns.FP.Print("não achei o Weapon Master de " .. row.name .. " na QuestieDB."); return end
+    if not best then ns.FP.Print(L["não achei o Weapon Master de "] .. row.name .. L[" na QuestieDB."]); return end
     if not best.same then
         local places = {}
         for _, o in ipairs(options) do places[#places + 1] = o.name .. " (" .. o.place .. ")" end
@@ -140,25 +141,25 @@ function ClassGuide.FollowTrainer(key)
         -- Spec 020, R1: o transporte cuja chegada fica mais perto do treinador, não só o mais perto de você
         local gate = M.PickGate(gates, options, ns.Planner.Distance)
         if gate then
-            ns.FP.Print(string.format("|cFFFFAA00%s: o treinador fica em outro continente (%s).|r Seta no %s %s, para %s; ao chegar do outro lado, clique em 'Ir ao treinador' de novo.",
-                row.name, table.concat(places, " ou "), gate.kind, gate.name, gate.dest))
+            ns.FP.Print(string.format(L["|cFFFFAA00%s: o treinador fica em outro continente (%s).|r Seta no %s %s, para %s; ao chegar do outro lado, clique em 'Ir ao treinador' de novo."],
+                row.name, table.concat(places, L[" ou "]), L[gate.kind], gate.name, gate.dest))
             ns.Gps.SetTarget(gate.point.mapID, gate.point.x, gate.point.y,
-                "Ir ao treinador de " .. row.name .. ": " .. gate.kind .. " " .. gate.name .. " (para " .. gate.dest .. ")")
+                L["Ir ao treinador de "] .. row.name .. ": " .. L[gate.kind] .. " " .. gate.name .. L[" (para "] .. gate.dest .. ")")
         else
-            ns.FP.Print(M.NoGateText(row.name, table.concat(places, " ou "), ns.Transports ~= nil))
+            ns.FP.Print(M.NoGateText(row.name, table.concat(places, L[" ou "]), ns.Transports ~= nil))
         end
         return
     end
-    ns.FP.Print(string.format("seguindo: treinar %s com %s", row.name, best.name))
-    ns.Gps.SetTarget(best.point.mapID, best.point.x, best.point.y, "Treinar " .. row.name .. ": " .. best.name)
+    ns.FP.Print(string.format(L["seguindo: treinar %s com %s"], row.name, best.name))
+    ns.Gps.SetTarget(best.point.mapID, best.point.x, best.point.y, L["Treinar "] .. row.name .. ": " .. best.name)
 end
 
 -- R5: aviso das perícias que faltam.
 function ClassGuide.WarnWeapons()
     local faction = _G.UnitFactionGroup and _G.UnitFactionGroup("player")
     for _, w in ipairs(M.MissingWeapons(classDef(), faction, isKnown, ClassGuide.IsEnabled)) do
-        local where = #w.trainers > 0 and table.concat(w.trainers, " ou ") or "Weapon Master da sua facção"
-        ns.FP.Print(string.format("|cFFFFD100você ainda não treinou %s.|r Weapon Master: %s. Botão 'Armas' da aba Guia aponta o caminho.", w.name, where))
+        local where = #w.trainers > 0 and table.concat(w.trainers, L[" ou "]) or L["Weapon Master da sua facção"]
+        ns.FP.Print(string.format(L["|cFFFFD100você ainda não treinou %s.|r Weapon Master: %s. Botão 'Armas' da aba Guia aponta o caminho."], L[w.name], where))
     end
 end
 
@@ -185,8 +186,8 @@ function ClassGuide.WarnSpells(level, onlyLevel)
         missing = fresh
     end
     if #missing == 0 then return true end
-    ns.FP.Print("|cFFFFD100feitiços novos para aprender|r (trainer ou quest de classe): " .. M.FormatSpells(missing, 8)
-        .. ". /fp treinar leva ao treinador mais perto.") -- spec 051, R6
+    ns.FP.Print(L["|cFFFFD100feitiços novos para aprender|r (trainer ou quest de classe): "] .. M.FormatSpells(missing, 8)
+        .. L[". /fp treinar leva ao treinador mais perto."]) -- spec 051, R6
     return true
 end
 
@@ -209,12 +210,12 @@ local function money() return _G.GetMoney and _G.GetMoney() or 0 end
 ns.FP.On("TRAINER_SHOW", function()
     local total, n = M.TrainTotal(trainerServices())
     if n > 0 then
-        ns.FP.Print(string.format("%d feitiço(s) para treinar aqui, total %s (você tem %s). /fp treinar tudo compra.",
+        ns.FP.Print(string.format(L["%d feitiço(s) para treinar aqui, total %s (você tem %s). /fp treinar tudo compra."],
             n, ns.Util.FormatMoney(total), ns.Util.FormatMoney(money())))
     end
     local frame = _G.ClassTrainerFrame
     if frame and not ClassGuide.trainAllButton and ns.Theme and ns.Theme.Button then
-        local b = ns.Theme.Button(frame, "Treinar tudo", 90, 22, function() ClassGuide.TrainAll() end)
+        local b = ns.Theme.Button(frame, L["Treinar tudo"], 90, 22, function() ClassGuide.TrainAll() end)
         b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -40, -30)
         ClassGuide.trainAllButton = b
     end
@@ -223,7 +224,7 @@ end)
 -- R3: compra os disponíveis em ordem enquanto o dinheiro der.
 function ClassGuide.TrainAll()
     local services = trainerServices()
-    if #services == 0 or not _G.BuyTrainerService then ns.FP.Print("abra a janela do treinador primeiro."); return end
+    if #services == 0 or not _G.BuyTrainerService then ns.FP.Print(L["abra a janela do treinador primeiro."]); return end
     -- R3 (parecer 053-056): escolhe em ordem, enquanto o dinheiro der; compra de trás para frente,
     -- porque comprar tira o serviço da lista e muda o índice dos seguintes.
     local pick, spent, left = {}, 0, money()
@@ -236,8 +237,8 @@ function ClassGuide.TrainAll()
     end
     for i = #pick, 1, -1 do _G.BuyTrainerService(pick[i].index) end
     local bought = #pick
-    ns.FP.Print(bought > 0 and string.format("treinou %d feitiço(s), gastou %s.", bought, ns.Util.FormatMoney(spent))
-        or "nada para treinar com o dinheiro que você tem.")
+    ns.FP.Print(bought > 0 and string.format(L["treinou %d feitiço(s), gastou %s."], bought, ns.Util.FormatMoney(spent))
+        or L["nada para treinar com o dinheiro que você tem."])
 end
 
 -- R4: posições da barra com rank velho.
@@ -260,31 +261,31 @@ ClassGuide.OldRanks = oldRanks -- spec 062: contagem nos essenciais
 function ClassGuide.MissingWeaponNames()
     local faction = _G.UnitFactionGroup and _G.UnitFactionGroup("player")
     local out = {}
-    for _, w in ipairs(M.MissingWeapons(classDef(), faction, isKnown, ClassGuide.IsEnabled)) do out[#out + 1] = w.name end
+    for _, w in ipairs(M.MissingWeapons(classDef(), faction, isKnown, ClassGuide.IsEnabled)) do out[#out + 1] = L[w.name] end
     return out
 end
 
 -- R5: /fp ranks [trocar]
 function ClassGuide.Ranks(arg)
     local list = oldRanks()
-    if #list == 0 then ns.FP.Print("nenhum rank velho na barra."); return end
+    if #list == 0 then ns.FP.Print(L["nenhum rank velho na barra."]); return end
     if arg ~= "trocar" then
         for _, r in ipairs(list) do
-            ns.FP.Print(string.format("  posição %d: %s do nível %d (o livro tem o do nível %d)", r.slot, r.name, r.lvl, r.newLvl))
+            ns.FP.Print(string.format(L["  posição %d: %s do nível %d (o livro tem o do nível %d)"], r.slot, r.name, r.lvl, r.newLvl))
         end
-        ns.FP.Print("/fp ranks trocar põe o rank novo no lugar.")
+        ns.FP.Print(L["/fp ranks trocar põe o rank novo no lugar."])
         return
     end
-    if InCombatLockdown() then ns.FP.Print("em combate não dá para mexer na barra."); return end
+    if InCombatLockdown() then ns.FP.Print(L["em combate não dá para mexer na barra."]); return end
     local pickup = (_G.C_Spell and _G.C_Spell.PickupSpell) or _G.PickupSpell
-    if not (pickup and _G.PlaceAction and _G.ClearCursor) then ns.FP.Print("este cliente não deixa trocar a barra."); return end
+    if not (pickup and _G.PlaceAction and _G.ClearCursor) then ns.FP.Print(L["este cliente não deixa trocar a barra."]); return end
     local done = 0
     for _, r in ipairs(list) do
         _G.ClearCursor(); pickup(r.newId); _G.PlaceAction(r.slot); _G.ClearCursor()
         local _, id = _G.GetActionInfo(r.slot)
         if id == r.newId then done = done + 1 end -- parecer: conta só o que a barra confirmou
     end
-    ns.FP.Print(string.format("%d de %d posição(ões) com o rank novo.", done, #list))
+    ns.FP.Print(string.format(L["%d de %d posição(ões) com o rank novo."], done, #list))
     ns.FP.Fire("SPELLS") -- spec 062: os essenciais refazem a contagem
 end
 
@@ -299,7 +300,7 @@ ns.FP.On("LEARNED", function()
             for _, r in ipairs(oldRanks()) do
                 if not ranksWarned[r.slot .. ":" .. r.newId] then ranksWarned[r.slot .. ":" .. r.newId] = true; fresh = fresh + 1 end
             end
-            if fresh > 0 then ns.FP.Print(string.format("|cFFFFD100%d botão(ões) da barra com rank velho.|r /fp ranks mostra; /fp ranks trocar troca.", fresh)) end
+            if fresh > 0 then ns.FP.Print(string.format(L["|cFFFFD100%d botão(ões) da barra com rank velho.|r /fp ranks mostra; /fp ranks trocar troca."], fresh)) end
         end)
     end)
 end)
@@ -309,7 +310,7 @@ function ClassGuide.FollowClassTrainer(always) -- always: seta mesmo sem feitiç
     local level = UnitLevel("player")
     local missing = ClassGuide.MissingSpells(level)
     if missing and #missing == 0 and not always then
-        ns.FP.Print(string.format("nada novo para treinar no nível %d.", level))
+        ns.FP.Print(string.format(L["nada novo para treinar no nível %d."], level))
         return
     end
     local _, class = UnitClass("player")
@@ -323,12 +324,12 @@ function ClassGuide.FollowClassTrainer(always) -- always: seta mesmo sem feitiç
     end
     local best = ns.Planner.Nearest(player, #near > 0 and near or all)
     if not best then
-        ns.FP.Print("não achei o treinador da sua classe na QuestieDB (" .. tostring(title) .. ").")
+        ns.FP.Print(L["não achei o treinador da sua classe na QuestieDB ("] .. tostring(title) .. ").")
         return
     end
-    if missing then ns.FP.Print("|cFFFFD100para treinar:|r " .. M.FormatSpells(missing, 8) .. ".") end
-    if #near == 0 then ns.FP.Print("o treinador mais perto fica em outro continente.") end
-    ns.Gps.SetTarget(best.mapID, best.x, best.y, "Treinar: " .. tostring(best.name))
+    if missing then ns.FP.Print(L["|cFFFFD100para treinar:|r "] .. M.FormatSpells(missing, 8) .. ".") end
+    if #near == 0 then ns.FP.Print(L["o treinador mais perto fica em outro continente."]) end
+    ns.Gps.SetTarget(best.mapID, best.x, best.y, L["Treinar: "] .. tostring(best.name))
 end
 
 -- Spec 017, R3: marco cumprido (o jogador já conhece o feitiço)?
@@ -337,7 +338,7 @@ function ClassGuide.IsMilestoneDone(m) return M.IsDone(m, isKnown) end
 -- R7: no login, avisa os marcos dos últimos níveis (instalou o addon depois de passar por eles).
 function ClassGuide.WarnMissedMilestones()
     for _, m in ipairs(M.Missed(classDef(), UnitLevel("player"), nil, isKnown)) do
-        ns.FP.Print(string.format("|cFFB38CFFmarco do nível %d (atrasado):|r %s", m.lvl, m.text))
+        ns.FP.Print(string.format(L["|cFFB38CFFmarco do nível %d (atrasado):|r %s"], m.lvl, L[m.text]))
     end
 end
 
@@ -345,11 +346,11 @@ end
 function ClassGuide.PrintMilestones()
     local level = UnitLevel("player")
     for _, m in ipairs(M.Missed(classDef(), level, nil, isKnown)) do
-        ns.FP.Print(string.format("[%d] %s |cFF888888(já passou)|r", m.lvl, m.text))
+        ns.FP.Print(string.format("[%d] %s |cFF888888%s|r", m.lvl, L[m.text], L["(já passou)"]))
     end
     local list = M.Upcoming(classDef(), level, 6, isKnown)
-    if #list == 0 then ns.FP.Print("sem marcos cadastrados para esta classe.") end
-    for _, m in ipairs(list) do ns.FP.Print(string.format("[%d] %s", m.lvl, m.text)) end
+    if #list == 0 then ns.FP.Print(L["sem marcos cadastrados para esta classe."]) end
+    for _, m in ipairs(list) do ns.FP.Print(string.format("[%d] %s", m.lvl, L[m.text])) end
 end
 
 -- R4, R5, R7, R8: avisos ao subir de nível. O nível vem do evento (UnitLevel pode atrasar).
@@ -357,13 +358,13 @@ local function onLevelUp(level)
     level = tonumber(level) or UnitLevel("player")
     local def = classDef()
     for _, m in ipairs(M.ForLevel(def, level, isKnown)) do
-        ns.FP.Print("|cFFB38CFFmarco do nível " .. level .. ":|r " .. m.text)
+        ns.FP.Print(L["|cFFB38CFFmarco do nível "] .. level .. ":|r " .. L[m.text])
     end
     if not ClassGuide.WarnSpells(level, level) and M.TrainerDue(def, level) then
-        ns.FP.Print("nível " .. level .. ": passe no trainer da classe, deve ter feitiço novo.")
+        ns.FP.Print(L["nível "] .. level .. L[": passe no trainer da classe, deve ter feitiço novo."])
     end
     for _, e in ipairs(M.UnlockedNow(ClassGuide.List(level), level)) do
-        ns.FP.Print(string.format("|cFFB38CFFquest de classe liberada:|r %s (%s). /fp classe para seguir.", e.name, e.zone))
+        ns.FP.Print(string.format(L["|cFFB38CFFquest de classe liberada:|r %s (%s). /fp classe para seguir."], e.name, e.zone))
     end
     ClassGuide.WarnWeapons()
 end

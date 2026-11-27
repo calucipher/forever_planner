@@ -80,6 +80,8 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 | `/fp venda` | Itens das bolsas: vale mais vender ao vendedor, leiloar ou desencantar |
 | `/fp modo facil` | Liga ou desliga o modo fácil (a partir do nível 10): quests e áreas com mobs de 2 a 4 níveis abaixo |
 | `/fp pular` | Pula a parada atual por 10 minutos, junto com as que dependem dela |
+| `/fp rota zona` | Liga ou desliga a Rota da zona (padrão: ligada) |
+| `/fp idioma pt\|en\|auto` | Idioma do addon (vale depois do `/reload`). Em `auto`, segue o idioma do cliente |
 
 - **Auto accept/turn-in**: aceita só as quests do plano (circuitos dos hubs da zona, a quest seguida e a continuação da que você acabou de entregar) e entrega sozinho. Quest fora do plano fica para você aceitar, com um aviso no chat. Na escolha de recompensa, pega o maior upgrade; sem upgrade, a que vende mais caro. Quest que cobra ouro não é entregue sozinha.
 - **Automações**: cada automação tem uma chave na aba Ferramentas (aceitar, entregar, escolher recompensa, seguir a próxima, pontos de voo na rota, entrega no caminho, marcar o voo, voar sozinho).
@@ -104,6 +106,10 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 - Clique numa quest para o GPS segui-la.
 - Clique direito na seta para parar o GPS.
 - Quando você entrega a quest seguida, o GPS escolhe sozinho a próxima melhor (`autoNext`).
+- **Rota da zona**: "Recalcular rota" junta as quests de todos os hubs da zona numa rota só, sem ir e voltar entre hubs. Clicar num hub da aba Guia segue só aquele hub.
+- **Quest de evento ou que mata**: escolta, defesa, ondas e "espere ele terminar" ficam fora da rota; ao aceitar, o addon pergunta "Pular" ou "Fazer em grupo". Quest que te matou duas vezes perto do objetivo também sai (vale por 2 níveis).
+- **Tempo por morte pelo nível do mob**: depois de umas 5 mortes por faixa, o XP/h usa o seu ritmo real contra mob do seu nível e mais baixo (`/fp calib` mostra).
+- **Idioma**: português no cliente pt-BR, inglês nos outros (`/fp idioma`).
 - **Caminho a pé**: a seta segue a estrada quando compensa e, sem estrada, o relevo. Pula pequenos buracos entre estradas quando o terreno deixa, e o trecho final até um NPC longe da estrada segue o relevo. Ela evita atravessar zona de nível bem acima do seu e avisa "cuidado" quando não há outro caminho.
 
 ## De onde vêm os dados

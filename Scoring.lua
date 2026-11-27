@@ -1,5 +1,6 @@
 -- Scoring.lua: score de item (estilo Pawn) e delta de upgrade contra o equipado.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Util = ns.Util
 local Scoring = {}
 ns.Scoring = Scoring
@@ -181,7 +182,7 @@ end
 
 function Scoring.Debug(ref)
     local id = tonumber(ref) or (ref and tonumber(ref:match("item:(%d+)")))
-    if not id then ns.FP.Print("uso: /fp stats <link ou itemID>"); return end
+    if not id then ns.FP.Print(L["uso: /fp stats <link ou itemID>"]); return end
     local _, link = C_Item.GetItemInfo(id)
     local raw = link and ((C_Item.GetItemStats and C_Item.GetItemStats(link)) or {}) or {}
     for k, v in pairs(raw) do

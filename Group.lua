@@ -1,5 +1,6 @@
 -- Group.lua: share de quests e avisos de progresso no chat do grupo (spec 022).
 local _, ns = ...
+local L = ns.L -- spec 066
 local Group = {}
 ns.Group = Group
 
@@ -40,7 +41,7 @@ function Group.Changes(prev, cur)
             end
         end
         if c.ready and not p.ready then
-            out[#out + 1] = { q = q, msg = "[FP] " .. c.name .. ": pronta para entregar", final = true }
+            out[#out + 1] = { q = q, msg = "[FP] " .. c.name .. L[": pronta para entregar"], final = true }
         end
     end
     return out
@@ -94,7 +95,7 @@ end
 local function questName(q)
     local t = C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(q)
     if not t and ns.Data.Q then t = ns.Data.Q.name(q) end
-    return t or ("quest " .. tostring(q))
+    return t or (L["quest "] .. tostring(q))
 end
 
 local function questState(q)
@@ -150,7 +151,7 @@ end)
 ns.FP.On("QUEST_ACCEPTED", function(q)
     q = ns.Util.Num(q)
     if not (q and inGroup() and announceOn()) then return end
-    send("[FP] peguei: " .. questName(q))
+    send(L["[FP] peguei: "] .. questName(q))
     if pushable(q) then
         if C_Timer then C_Timer.After(0.5, function() push(q) end) else push(q) end
     end
@@ -159,14 +160,14 @@ end)
 -- R8: botão "Grupo" e /fp grupo.
 local function summaryPart(q)
     local st = questState(q)
-    if st.ready then return st.name .. " (pronta)" end
+    if st.ready then return st.name .. L[" (pronta)"] end
     local objs = {}
     for _, o in ipairs(st.objs) do objs[#objs + 1] = Group.ObjectiveText(o) end
     return #objs > 0 and (st.name .. ": " .. table.concat(objs, ", ")) or st.name
 end
 
 function Group.ShareAll()
-    if not inGroup() then ns.FP.Print("você não está em grupo."); return end
+    if not inGroup() then ns.FP.Print(L["você não está em grupo."]); return end
     local parts, n = {}, 0
     for _, q in ipairs(ns.Data.LogQuests()) do
         parts[#parts + 1] = summaryPart(q)
@@ -177,13 +178,13 @@ function Group.ShareAll()
         end
     end
     for _, line in ipairs(Group.SummaryLines(parts, MAX_LEN)) do send(line) end
-    ns.FP.Print(string.format("compartilhando %d quest(s) com o grupo.", n))
+    ns.FP.Print(string.format(L["compartilhando %d quest(s) com o grupo."], n))
 end
 
 -- R9
 function Group.ToggleAnnounce()
     ns.FP.db.groupAnnounce = not announceOn()
-    ns.FP.Print(ns.FP.db.groupAnnounce and "avisos no grupo ligados." or "avisos no grupo desligados.")
+    ns.FP.Print(ns.FP.db.groupAnnounce and L["avisos no grupo ligados."] or L["avisos no grupo desligados."])
 end
 
 return Group

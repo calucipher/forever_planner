@@ -1,6 +1,7 @@
 -- Gates.lua: passagens entre zonas (spec 049). Núcleo puro: aprende com as amostras do jogador,
 -- acha o caminho a pé pelas passagens e monta o título. Distâncias em jardas do mundo.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Gates = {}
 ns.Gates = Gates
 
@@ -83,17 +84,17 @@ function Gates.Route(gates, from, to, dist, opts)
 end
 
 -- Spec 064, R2: custo de atravessar uma zona pelo meio da faixa dela contra o nível do jogador.
-function Gates.DangerCost(lo, hi, L)
-    if not (lo and L) then return 1 end
+function Gates.DangerCost(lo, hi, lvl)
+    if not (lo and lvl) then return 1 end
     local mid = hi and (lo + hi) / 2 or lo
-    if mid <= L + 2 then return 1 end
-    if mid <= L + 5 then return 3 end
+    if mid <= lvl + 2 then return 1 end
+    if mid <= lvl + 5 then return 3 end
     return 10
 end
 
 -- R4: título da seta.
 function Gates.Title(step, name, title)
-    return string.format("Passagem: %s > %s · depois: %s", tostring(name(step.from)), tostring(name(step.to)), tostring(title))
+    return string.format(L["Passagem: %s > %s · depois: %s"], tostring(name(step.from)), tostring(name(step.to)), tostring(title))
 end
 
 return Gates

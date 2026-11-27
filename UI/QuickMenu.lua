@@ -1,6 +1,7 @@
 -- UI/QuickMenu.lua: menu do botão "+" ao lado da seta do GPS (spec 006, R9 e R10).
 local _, ns = ...
 local Theme = ns.Theme
+local L = ns.L -- spec 066
 local Menu = {}
 ns.QuickMenu = Menu
 
@@ -13,7 +14,7 @@ local function itemsFromRegistry()
     for _, c in ipairs(ns.Commands.list) do byId[c.id] = c end
     for _, id in ipairs(Menu.items) do
         local c = byId[id]
-        if c then out[#out + 1] = { c.label, function() c.run(nil) end, c.tip } end
+        if c then out[#out + 1] = { L[c.label], function() c.run(nil) end, L[c.tip] } end -- spec 066: K() no registro
     end
     return out
 end
@@ -52,12 +53,12 @@ local function buildWeapons()
     d:SetFrameStrata("DIALOG"); d:SetClampedToScreen(true); d:Hide()
     d.title = Theme.Text(d, 13, Theme.c.accent, "OUTLINE")
     d.title:SetPoint("TOPLEFT", 12, -10)
-    d.title:SetText("Armas da classe")
+    d.title:SetText(L["Armas da classe"])
     d.hint = Theme.Text(d, 10, Theme.c.muted)
     d.hint:SetPoint("TOPLEFT", d.title, "BOTTOMLEFT", 0, -4); d.hint:SetWidth(396); d.hint:SetWordWrap(true)
-    d.hint:SetText("Marque as armas que você quer usar. Só elas geram aviso e '(treine X)'.")
+    d.hint:SetText(L["Marque as armas que você quer usar. Só elas geram aviso e '(treine X)'."])
     d.rows = {}
-    local close = Theme.Button(d, "Fechar", 80, 22, function() d:Hide() end)
+    local close = Theme.Button(d, L["Fechar"], 80, 22, function() d:Hide() end)
     close:SetPoint("BOTTOMRIGHT", -12, 10)
     _G.ForeverPlannerWeapons = d -- UISpecialFrames procura o frame pelo nome global (ESC fecha)
     tinsert(UISpecialFrames, "ForeverPlannerWeapons")
@@ -68,7 +69,7 @@ function Menu.ShowWeapons()
     Menu.weapons = Menu.weapons or buildWeapons()
     local d = Menu.weapons
     local rows = ns.ClassGuide.WeaponRows()
-    if #rows == 0 then ns.FP.Print("esta classe não tem perícias de arma cadastradas."); return end
+    if #rows == 0 then ns.FP.Print(L["esta classe não tem perícias de arma cadastradas."]); return end
     for i, r in ipairs(rows) do
         local line = d.rows[i]
         if not line then
@@ -80,14 +81,15 @@ function Menu.ShowWeapons()
             line.name:SetJustifyH("LEFT")
             line.state = Theme.Text(line, 11, Theme.c.muted); line.state:SetPoint("LEFT", 176, 0); line.state:SetWidth(110)
             line.state:SetJustifyH("LEFT")
-            line.go = Theme.Button(line, "Ir ao treinador", 100, 22, nil)
+            line.go = Theme.Button(line, L["Ir ao treinador"], 100, 22, nil)
             line.go:SetPoint("RIGHT", 0, 0)
             d.rows[i] = line
         end
         line.check:SetChecked(r.enabled)
         line.check:SetScript("OnClick", function(self) ns.ClassGuide.SetEnabled(r.key, self:GetChecked()); Menu.ShowWeapons() end)
-        line.name:SetText(r.name)
-        line.state:SetText(r.known and "|cFF73E65Atreinada|r" or (r.enabled and "|cFFFFAA00falta|r" or "|cFF888888não uso|r"))
+        line.name:SetText(L[r.name])
+        line.state:SetText(r.known and ("|cFF73E65A" .. L["treinada"] .. "|r")
+            or (r.enabled and ("|cFFFFAA00" .. L["falta"] .. "|r") or ("|cFF888888" .. L["não uso"] .. "|r")))
         line.go:SetShown(not r.known and r.enabled)
         line.go:SetScript("OnClick", function() ns.ClassGuide.FollowTrainer(r.key) end)
         line:Show()
@@ -107,9 +109,9 @@ local function buildDialog()
     d.body = Theme.Text(d, 11, Theme.c.text)
     d.body:SetPoint("TOPLEFT", d.title, "BOTTOMLEFT", 0, -8); d.body:SetWidth(316)
     d.body:SetJustifyV("TOP"); d.body:SetWordWrap(true)
-    d.ok = Theme.Button(d, "Abandonar", 140, 24, nil, "primary")
+    d.ok = Theme.Button(d, L["Abandonar"], 140, 24, nil, "primary")
     d.ok:SetPoint("BOTTOMLEFT", 12, 10)
-    d.cancel = Theme.Button(d, "Cancelar", 100, 24, function() d:Hide() end)
+    d.cancel = Theme.Button(d, L["Cancelar"], 100, 24, function() d:Hide() end)
     d.cancel:SetPoint("BOTTOMRIGHT", -12, 10)
     return d
 end
@@ -117,20 +119,20 @@ end
 function Menu.ShowCleanup()
     local list = ns.Guide.CleanupList()
     if #list == 0 then
-        ns.FP.Print("nada para limpar: as quests do log valem a pena ou estão protegidas.")
+        ns.FP.Print(L["nada para limpar: as quests do log valem a pena ou estão protegidas."])
         return
     end
     Menu.dialog = Menu.dialog or buildDialog()
     local d, lines, ids = Menu.dialog, {}, {}
     for _, c in ipairs(list) do
-        lines[#lines + 1] = string.format("·  %s  |cFF888888(%s)|r", c.name, c.reason)
+        lines[#lines + 1] = string.format("·  %s  |cFF888888(%s)|r", c.name, L[c.reason])
         ids[#ids + 1] = c.id
     end
-    d.title:SetText(string.format("Abandonar %d quest(s)?", #list))
+    d.title:SetText(string.format(L["Abandonar %d quest(s)?"], #list))
     d.body:SetText(table.concat(lines, "\n") ..
-        "\n\n|cFF888888Protegidas e fora da lista: quest de classe, cadeia que leva a upgrade ou a muito XP, quest que não existia no Classic.|r")
+        "\n\n|cFF888888" .. L["Protegidas e fora da lista: quest de classe, cadeia que leva a upgrade ou a muito XP, quest que não existia no Classic."] .. "|r")
     d:SetHeight(100 + d.body:GetStringHeight())
-    d.ok.label:SetText(string.format("Abandonar %d", #list))
+    d.ok.label:SetText(string.format(L["Abandonar %d"], #list))
     d.ok:SetScript("OnClick", function() d:Hide(); ns.Guide.Abandon(ids) end)
     d:Show()
 end

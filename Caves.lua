@@ -2,6 +2,7 @@
 -- amostras de posição e as listas por parâmetro; não chama a API do jogo nem lê o db.
 -- Distâncias em jardas do mundo. Os padrões são estimativa, a calibrar no jogo.
 local _, ns = ...
+local L = ns.L -- spec 066
 local Caves = {}
 ns.Caves = Caves
 
@@ -140,9 +141,9 @@ end
 
 -- R6: título mostrado com a entrada.
 function Caves.Title(d, title)
-    local name = d.name or "caverna"
-    if d.seed then name = name .. " (estimativa)" end
-    return string.format("%s: %s · depois: %s", d.exit and "Saída" or "Entrada", name, tostring(title))
+    local name = d.name or L["caverna"]
+    if d.seed then name = name .. L[" (estimativa)"] end
+    return string.format(L["%s: %s · depois: %s"], d.exit and L["Saída"] or L["Entrada"], name, tostring(title))
 end
 
 -- Lista da Content/Caves.lua (coordenada 0–100 da zona) convertida para jardas do mundo.
