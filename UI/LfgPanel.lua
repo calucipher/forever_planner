@@ -97,11 +97,13 @@ local function readRows()
     for _, id in ipairs(results or {}) do
         local okI, info = try("GetSearchResultInfo", lvl.GetSearchResultInfo, id)
         if okI and info then
+            local okC, counts = try("GetSearchResultMemberCounts", lvl.GetSearchResultMemberCounts, id) -- R18
             local acts = {}
             for _, aid in ipairs(info.activityIDs or {}) do acts[#acts + 1] = activityInfo(aid) end
             rows[#rows + 1] = { searchResultID = id, leaderName = info.leaderName,
                 key = info.leaderName and Lfg.Key(info.leaderName, nil, realm), numMembers = info.numMembers,
-                age = info.age, isDelisted = info.isDelisted, hasSelf = info.hasSelf, acts = acts }
+                age = info.age, isDelisted = info.isDelisted, hasSelf = info.hasSelf, acts = acts,
+                roles = okC and type(counts) == "table" and counts or nil }
         end
     end
     return rows
@@ -263,7 +265,14 @@ local function fill(f, list, lvl)
             local size = a and a.maxNumPlayers and a.maxNumPlayers > 0 and ("/" .. a.maxNumPlayers) or ""
             local fit = a and Lfg.Fit(a, lvl)
             local color = fit == 0 and "|cFF73E659" or "|cFFEDEBF5"
-            r.top:SetText(color .. ((a and a.shortName) or "?") .. "|r  " .. (solo and "sozinho" or ((row.numMembers or 0) .. size)))
+            local roles = "" -- R18: o que falta no grupo; sem vaga para o seu papel, em vermelho
+            local miss = not solo and Lfg.Missing(row.roles)
+            if miss then
+                local need = Lfg.NeedsRole(row.roles, role())
+                roles = #miss > 0 and (L["  ·  falta: "] .. table.concat(miss, ", ")) or L["  ·  completo"]
+                if need == false then roles = roles .. "  |cFFFF6666" .. string.format(L["(sem vaga de %s)"], role()) .. "|r" end
+            end
+            r.top:SetText(color .. ((a and a.shortName) or "?") .. "|r  " .. (solo and L["sozinho"] or ((row.numMembers or 0) .. size)) .. roles)
             local d = a and ns.DungeonGuide.ForActivity(a.fullName or a.shortName)
             local e = d and ns.DungeonGuide.Nearest(d)
             local st = d and ns.DungeonGuide.AttuneState(d)
@@ -305,7 +314,7 @@ function Panel.Refresh()
         return
     end
     local lvl = UnitLevel("player")
-    local list = Lfg.Sort(rows, lvl, calls)
+    local list = Lfg.Sort(rows, lvl, calls, role()) -- R18
     fill(frame, list, lvl)
     if #list == 0 then
         frame.empty:SetText(L["faça uma busca na janela do LFG; os grupos aparecem aqui, os do seu nível primeiro"])

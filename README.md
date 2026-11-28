@@ -110,6 +110,8 @@ Para atualizar à mão, apague a pasta `ForeverPlanner` antiga e extraia o zip n
 - **Quest de evento ou que mata**: escolta, defesa, ondas e "espere ele terminar" ficam fora da rota; ao aceitar, o addon pergunta "Pular" ou "Fazer em grupo". Quest que te matou duas vezes perto do objetivo também sai (vale por 2 níveis).
 - **Tempo por morte pelo nível do mob**: depois de umas 5 mortes por faixa, o XP/h usa o seu ritmo real contra mob do seu nível e mais baixo (`/fp calib` mostra).
 - **Idioma**: português no cliente pt-BR, inglês nos outros (`/fp idioma`).
+- **Mob alto ou área perigosa**: quando o item cai de vários mobs, a seta só vai aos que estão no seu nível; ponto de objetivo cercado de mob bem acima do seu nível sai da rota se houver outro, e quest com o objetivo só em lugar perigoso fica para depois ("área perigosa").
+- **Procurar grupo**: cada grupo mostra as funções que faltam ("falta: Tank, 2 DPS") e os que têm vaga para o seu papel aparecem primeiro.
 - **Caminho a pé**: a seta segue a estrada quando compensa e, sem estrada, o relevo. Pula pequenos buracos entre estradas quando o terreno deixa, e o trecho final até um NPC longe da estrada segue o relevo. Ela evita atravessar zona de nível bem acima do seu e avisa "cuidado" quando não há outro caminho.
 
 ## De onde vêm os dados

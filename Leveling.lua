@@ -616,6 +616,34 @@ end
 -- Spec 030, R2: objetivo com mob médio mais de 1,5 nível acima do jogador.
 -- Spec 031, R5: a tolerância muda com a força do personagem; sem ela, vale o 1,5.
 Leveling.MAX_MOB_ABOVE = 1.5
+
+-- Spec 030, R7 (emenda de 28/11/2026): ponto de objetivo cercado de mob alto. dangerAt(p) diz se o
+-- ponto é perigoso; com algum ponto seguro, só os seguros ficam; sem nenhum, ficam todos (a quest segue
+-- a regra de mobs altos da R3).
+Leveling.DANGER_GAP, Leveling.DANGER_MIN = 3, 3 -- mob 3 níveis acima; 3 spawns por perto
+function Leveling.DangerousCount(mids, playerLevel)
+    local n = 0
+    for _, m in ipairs(mids or {}) do if m >= playerLevel + Leveling.DANGER_GAP then n = n + 1 end end
+    return n
+end
+function Leveling.SafePoints(points, dangerAt)
+    local safe = {}
+    for _, p in ipairs(points or {}) do if not dangerAt(p) then safe[#safe + 1] = p end end
+    if #safe == 0 or #safe == #(points or {}) then return points end
+    return safe
+end
+
+-- Spec 030, R6 (emenda de 28/11/2026, visto no jogo: "Elixir of Pain" (24) junta o sangue de quatro
+-- leões, dois em Hillsbrad (23–28) e dois em Alterac (32–34); a seta mandou para os de 32).
+-- mobs = { { lo, hi, n = pontos } }. Devolve os mobs até nível + tolerância; se nenhum estiver, todos.
+function Leveling.MobsInReach(mobs, playerLevel, tolerance)
+    if not (mobs and playerLevel) then return mobs end
+    local out = {}
+    for _, m in ipairs(mobs) do
+        if (m.lo + m.hi) / 2 <= playerLevel + (tolerance or Leveling.MAX_MOB_ABOVE) then out[#out + 1] = m end
+    end
+    return #out > 0 and out or mobs
+end
 function Leveling.MobsTooHigh(avgLevel, playerLevel, state, tolerance)
     return state ~= "entregar" and avgLevel ~= nil and playerLevel ~= nil and playerLevel ~= false
         and avgLevel > playerLevel + (tolerance or Leveling.MAX_MOB_ABOVE)
@@ -759,6 +787,9 @@ local function asideReason(q, p)
         if Leveling.MobsTooHigh(o.avgLevel, p.playerLevel, q.state, p.mobTolerance) then high = max(high or 0, o.avgLevel) end
     end
     if high then return K("mobs altos"), math.ceil(high - (p.mobTolerance or Leveling.MAX_MOB_ABOVE)) end -- spec 031, R6
+    if q.state ~= "entregar" then -- spec 030, R7a: objetivo só em lugar cercado de mob alto
+        for _, o in ipairs(pending(q)) do if o.danger then return K("área perigosa") end end
+    end
     if q.dungeon then return q.group == "grupo" and K("masmorra (em grupo)") or "dungeon" end -- spec 054, R3
     if q.elite and q.group ~= "grupo" then return "elite" end
     -- Spec 067, R4: evento ou quest que já te matou duas vezes, sem a escolha "grupo"

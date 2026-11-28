@@ -465,7 +465,7 @@ local function isMob(npc)
     local f = Data.N.factionID(npc) or 0
     local notMob = ns.ZoneContent and ns.ZoneContent.notMobFactions or {}
     if notMob[f] then return false end -- emenda da 2ª rodada
-    return ns.Zones.Hostile((Data.factionTemplate or {})[f])
+    return ns.Zones.Hostile((Data.factionTemplate or {})[f], _G.UnitFactionGroup and _G.UnitFactionGroup("player"))
 end
 local function spawnsInZone(npc, zone)
     local n = 0
@@ -498,17 +498,21 @@ local function dropObjective(item, qLevel, zone)
     local npcs, objs = Data.I.npcDrops(item) or {}, Data.I.objectDrops(item) or {}
     if #npcs == 0 and #objs == 0 then return nil end
     local pts, levels, allElite, est, dungeon = {}, {}, #npcs > 0, false, false
+    local mobs = {} -- spec 030, R6: cada mob com os pontos dele, para tirar o alto demais na hora
     for _, npc in ipairs(npcs) do
-        addAll(pts, entityPoints("npc", npc))
+        local own = entityPoints("npc", npc)
+        addAll(pts, own)
         local lo, hi, e2 = npcLevels(npc, qLevel)
         levels[#levels + 1] = { lo, hi }
+        mobs[#mobs + 1] = { lo = lo, hi = hi, n = #own, points = own } -- todo NPC que dropa (o novo do Forever vem sem facção)
         est = est or e2
         if not isEliteNpc(npc) then allElite = false end
         dungeon = dungeon or inDungeon(Data.N.spawns(npc))
     end
-    local objSpawns = {}
+    local objSpawns, objPts = {}, {}
     for _, obj in ipairs(objs) do
-        addAll(pts, entityPoints("object", obj))
+        local own = entityPoints("object", obj)
+        addAll(pts, own); addAll(objPts, own)
         objSpawns[#objSpawns + 1] = Data.O.spawns(obj)
     end
     -- spec 006, R20: item só de objeto, e objeto só em masmorra (Blueleaf Tuber, Razorfen Kraul), é masmorra.
@@ -522,7 +526,7 @@ local function dropObjective(item, qLevel, zone)
     local named = #npcs == 1 and #objs == 0 and spawnCount(npcs[1]) <= 2
     return { key = key, kind = #npcs > 0 and "loot" or "object", names = { Data.I.name(item) },
         label = Data.I.name(item), points = pts, levels = levels, estimated = est,
-        rate = named and 1 or LOOT_RATE, item = item,
+        rate = named and 1 or LOOT_RATE, item = item, mobs = #mobs > 1 and mobs or nil, objPoints = objPts,
         -- emenda R1: item que também cai de objeto dá para cumprir sem matar
         avgLevel = (#npcs > 0 and #objs == 0) and avgLevelOf(npcs, qLevel, zone) or nil },
         allElite, dungeon
@@ -571,15 +575,17 @@ local function staticObjectives(q)
     end
     for _, e in ipairs(o[5] or {}) do -- kill credit: { {npcIds...}, creditId, nome }
         local npcs = type(e[1]) == "table" and e[1] or {}
-        local pts, levels = {}, {}
+        local pts, levels, mobs = {}, {}, {}
         for _, npc in ipairs(npcs) do
-            addAll(pts, entityPoints("npc", npc))
+            local own = entityPoints("npc", npc)
+            addAll(pts, own)
             local lo, hi = npcLevels(npc, qLevel)
             levels[#levels + 1] = { lo, hi }
             if isEliteNpc(npc) then elite = true end
+            mobs[#mobs + 1] = { lo = lo, hi = hi, n = #own, points = own } -- spec 030, R6
         end
         list[#list + 1] = { key = "kc:" .. tostring(e[2]), kind = "kill", names = { e[3], Data.N.name(e[2] or 0) },
-            label = e[3] or Data.N.name(e[2] or 0), points = pts, levels = levels,
+            label = e[3] or Data.N.name(e[2] or 0), points = pts, levels = levels, mobs = #mobs > 1 and mobs or nil,
             avgLevel = #npcs > 0 and avgLevelOf(npcs, qLevel, zone) or nil }
     end
 
@@ -632,6 +638,20 @@ end
 
 -- Objetivos da quest para o nível do jogador:
 -- { key, kind, label, points, kills, objects, mobXP, done, estimated }
+-- Spec 030, R7: o ponto tem 3 ou mais mobs comuns hostis, 3 níveis acima, na célula dele e nas vizinhas?
+function Data.DangerAt(p, level)
+    local cat = Data.zoneCatalog
+    if not (cat and cat.danger and p and p.mapID and p.x and p.y) then return false end
+    local cx, cy, mids = math.floor(p.x), math.floor(p.y), {}
+    for dx = -1, 1 do
+        for dy = -1, 1 do
+            for _, m in ipairs(cat.danger[p.mapID * 1000000 + (cx + dx) * 1000 + (cy + dy)] or {}) do mids[#mids + 1] = m end
+        end
+    end
+    return ns.Leveling.DangerousCount(mids, level) >= ns.Leveling.DANGER_MIN
+end
+local safeCache = setmetatable({}, { __mode = "k" })
+
 function Data.Objectives(q, level, factor)
     local st = staticObjectives(q)
     local ready = Data.IsOnQuest(q) and Data.IsReadyForTurnIn(q)
@@ -659,9 +679,35 @@ function Data.Objectives(q, level, factor)
         end
         local after = {}
         for _, k in ipairs(ob.after or {}) do if not doneKey[k] then after[#after + 1] = k end end
-        out[#out + 1] = { key = ob.key, kind = ob.kind, label = ob.label, points = ob.points,
+        local points, avgLevel = ob.points, ob.avgLevel
+        if ob.mobs then -- spec 030, R6: mob de vários níveis; o alto demais sai dos pontos (a média da R1 fica)
+            local tol = ns.FP and ns.FP.MobTolerance and ns.FP.MobTolerance() or nil
+            local kept = ns.Leveling.MobsInReach(ob.mobs, level, tol)
+            if #kept < #ob.mobs then
+                points = {}
+                for _, m in ipairs(kept) do addAll(points, m.points) end
+                addAll(points, ob.objPoints or {})
+            end
+        end
+        local danger = false
+        if Data.zoneCatalog and #points > 0 then -- spec 030, R7: fora o ponto cercado de mob alto
+            local c = safeCache[ob]
+            if not c or c.level ~= level or c.from ~= #points then
+                local bad = 0
+                local function at(p)
+                    local d = Data.DangerAt(p, level)
+                    if d then bad = bad + 1 end
+                    return d
+                end
+                local safe = ns.Leveling.SafePoints(points, at)
+                c = { level = level, from = #points, points = safe, all = bad == #points } -- R7a: tudo perigoso
+                safeCache[ob] = c
+            end
+            points, danger = c.points, c.all
+        end
+        out[#out + 1] = { key = ob.key, kind = ob.kind, label = ob.label, points = points,
             kills = done and 0 or kills, objects = done and 0 or objects, mobXP = mobXP, done = done,
-            estimated = ob.estimated, after = after, avgLevel = ob.avgLevel }
+            estimated = ob.estimated, after = after, avgLevel = avgLevel, danger = danger or nil }
     end
     return out, st.elite, st.dungeon
 end
@@ -1044,9 +1090,26 @@ local function addMob(cat, n)
     if C.notLevelingNpcs and C.notLevelingNpcs[n] then return end
     local f = N.factionID(n) or 0
     if (C.critterFactions and C.critterFactions[f]) or ns.Zones.IsHelperName(N.name(n)) then return end
-    if not ns.Zones.Hostile(Data.factionTemplate[f]) then return end
+    if not ns.Zones.Hostile(Data.factionTemplate[f], cat.faction) then return end
     hi = math.max(hi, lo)
     local rank = N.rank(n) or 0
+    -- spec 030, R7: perigo por lugar (célula de 1% do mapa). R7b: só quem ataca a facção do jogador;
+    -- elite e raro contam como 3 (é o que mais mata); chefe (rank 3) fica de fora.
+    local weight = (rank == 0 and 1) or ((rank == 1 or rank == 2 or rank == 4) and 3) or 0
+    if weight > 0 and cat.danger and ns.Zones.Hostile(Data.factionTemplate[f], cat.faction, true) then
+        local mid = (lo + hi) / 2
+        for area, pts in pairs(N.spawns(n) or {}) do
+            local map = Data.areaToMap[area]
+            if map then
+                for _, p in ipairs(pts) do
+                    local k = map * 1000000 + math.floor(p[1]) * 1000 + math.floor(p[2])
+                    local t = cat.danger[k]
+                    if not t then t = {}; cat.danger[k] = t end
+                    for _ = 1, weight do t[#t + 1] = mid end
+                end
+            end
+        end
+    end
     for area, pts in pairs(N.spawns(n) or {}) do
         local z = cat.zones[Data.ZoneOfArea(area)]
         if z and #pts > 0 then
@@ -1088,7 +1151,7 @@ function Data.BuildZoneCatalog()
     if Data.zoneCatalog or Data.buildingCatalog or not Data.Q then return end
     Data.buildingCatalog = true
     local faction = _G.UnitFactionGroup and _G.UnitFactionGroup("player") or "Horde"
-    local cat = { zones = {}, info = {}, children = {} }
+    local cat = { zones = {}, info = {}, children = {}, danger = {}, faction = faction }
     local co = coroutine.create(function()
         for i, q in ipairs(Data.Q.GetAllIds()) do
             local zone, area = catalogQuest(q, faction)

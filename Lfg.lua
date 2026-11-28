@@ -63,19 +63,44 @@ function Lfg.CanCall(row, lvl)
     return true
 end
 
+-- R18 (emenda de 28/11/2026, pedido: "na janela de LFM do addon não diz as roles"): o que falta no
+-- grupo, de C_LFGList.GetSearchResultMemberCounts (TANK_REMAINING, HEALER_REMAINING, DAMAGER_REMAINING).
+Lfg.ROLES = { { "Tank", "TANK_REMAINING" }, { "Healer", "HEALER_REMAINING" }, { "DPS", "DAMAGER_REMAINING" } }
+function Lfg.Missing(counts)
+    if type(counts) ~= "table" then return nil end
+    local out = {}
+    for _, r in ipairs(Lfg.ROLES) do
+        local n = tonumber(counts[r[2]]) or 0
+        if n > 0 then out[#out + 1] = n > 1 and (n .. " " .. r[1]) or r[1] end
+    end
+    return out
+end
+-- verdadeiro: há vaga para o papel; falso: não há; nil: sem dado.
+function Lfg.NeedsRole(counts, role)
+    if type(counts) ~= "table" or not role then return nil end
+    for _, r in ipairs(Lfg.ROLES) do
+        if r[1] == role then return (tonumber(counts[r[2]]) or 0) > 0 end
+    end
+    return nil
+end
+
 -- R5: grupos antes de sozinhos; depois Fit, não chamado, anúncio mais novo e searchResultID.
-function Lfg.Sort(rows, lvl, calls)
+-- R18: entre os grupos, os que têm vaga para o papel do jogador primeiro; os sem vaga por último.
+function Lfg.Sort(rows, lvl, calls, role)
     local keyed = {}
     for _, r in ipairs(rows) do
         if not r.hasSelf then
             local a = Lfg.BestActivity(r.acts, lvl)
             local c, d = fitRank(a and Lfg.Fit(a, lvl))
+            local need = Lfg.NeedsRole(r.roles, role)
             keyed[#keyed + 1] = { r = r, solo = (r.numMembers or 0) <= 1 and 1 or 0, c = c, d = d,
+                need = need == true and 0 or (need == nil and 1 or 2),
                 called = calls and r.key and calls[r.key] and 1 or 0, age = r.age or 0, id = r.searchResultID or 0 }
         end
     end
     table.sort(keyed, function(x, y)
         if x.solo ~= y.solo then return x.solo < y.solo end
+        if x.need ~= y.need then return x.need < y.need end
         if x.c ~= y.c then return x.c < y.c end
         if x.d ~= y.d then return x.d < y.d end
         if x.called ~= y.called then return x.called < y.called end

@@ -902,4 +902,11 @@ ns.Locale.tables.en = {
     ["Rota da zona"] = "Zone route",
     ["Junta as quests de todos os hubs da zona numa rota só, sem ir e voltar entre hubs (spec 068)"] = "Joins the quests of every hub in the zone into one route, without going back and forth between hubs (spec 068)",
     ["rota da zona:"] = "zone route:",
+    ["área perigosa"] = "dangerous area",
+
+    -- spec 037, R18
+    ["sozinho"] = "solo",
+    ["  ·  falta: "] = "  ·  needs: ",
+    ["  ·  completo"] = "  ·  full",
+    ["(sem vaga de %s)"] = "(no %s slot)",
 }

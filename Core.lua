@@ -137,7 +137,12 @@ end
 -- Parâmetros efetivos: medidos no jogo quando há amostras (R7), senão os do db.
 local MIN_SAMPLES = 5
 local MAX_KILL_GAP = 45 -- spec 009, R7: acima disso o intervalo inclui caminhada e loot
+-- Spec 067, R6b (emenda de 28/11/2026, visto no diário: em grupo, yetis 4 níveis acima morriam em
+-- 27 s e davam metade do XP): amostra de tempo e de XP só sozinho.
+local function solo() return not (_G.IsInGroup and _G.IsInGroup()) end
+FP.Solo = solo
 function FP.RecordKillGap(gap)
+    if not solo() then return end
     if gap and gap > 0 and gap <= MAX_KILL_GAP then ns.Leveling.PushSample(FP.db.calib.kill, gap, 20) end
 end
 function FP.KillSeconds(minSamples)
@@ -153,6 +158,7 @@ end
 local MAX_KILL_TIME = 180
 function FP.RecordKillTime(ttk, mobLevel)
     local lvl = UnitLevel("player")
+    if not solo() then return end -- R6b
     if not (ttk and ttk > 0 and ttk <= MAX_KILL_TIME and mobLevel and lvl) then return end
     FP.db.calib.killDiff = FP.db.calib.killDiff or {}
     ns.Leveling.PushSample(FP.db.calib.killDiff, { d = ns.Leveling.KillDiff(mobLevel, lvl), s = ttk }, 200)
@@ -187,7 +193,16 @@ function FP.GearItemLevel()
     return ns.Leveling.AvgItemLevel(levels)
 end
 -- Tolerância de mobs altos (R4, R7): tolerância, fonte e número de amostras de luta.
+local tolMemo -- parecer 030: a tolerância lê o gear; uma vez por segundo basta
 function FP.MobTolerance()
+    local now = _G.GetTime and _G.GetTime() or 0
+    local key = #(FP.db.calib.danger or {}) .. ":" .. tostring(UnitLevel("player")) .. ":" .. tostring(FP.db.easyMode)
+    if tolMemo and tolMemo.key == key and now - tolMemo.at < 1 then return tolMemo.tol, tolMemo.source, tolMemo.n end
+    local tol, source, n = FP.ComputeMobTolerance()
+    tolMemo = { at = now, key = key, tol = tol, source = source, n = n }
+    return tol, source, n
+end
+function FP.ComputeMobTolerance()
     local lvl = ns.Leveling
     local danger = FP.db.calib.danger or {}
     local combat, recentDeath = lvl.CombatOffset(danger)
@@ -291,7 +306,7 @@ local function OnXPGain(msg)
     if not lvl or lvl <= 0 then return end
     FightKill(lvl) -- spec 031, R8
     local expected = ns.Leveling.MobXP(UnitLevel("player"), lvl, 1)
-    if expected > 0 then ns.Leveling.PushSample(FP.db.calib.xp, (xp - rested) / expected, 20) end
+    if expected > 0 and solo() then ns.Leveling.PushSample(FP.db.calib.xp, (xp - rested) / expected, 20) end -- R6b
 end
 
 -- Ações adiadas para depois do combate (nada pesado em combate)
@@ -406,6 +421,10 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" and arg1 == ADDON then
         ForeverPlannerDB = Util.CopyDefaults(FP.defaults, ForeverPlannerDB)
         FP.db = ForeverPlannerDB
+        -- Spec 067, R6b: as amostras antigas misturavam grupo e solo; uma vez, recomeçam do zero
+        if not FP.db.calib.soloOnly then
+            FP.db.calib.killDiff, FP.db.calib.xp, FP.db.calib.kill, FP.db.calib.soloOnly = {}, {}, {}, true
+        end
         -- Spec 066, R3: o idioma escolhido fica na conta (ForeverPlannerWorld), lido quando o SavedVariables chega
         local W = _G.ForeverPlannerWorld
         ns.Locale.Set(ns.Locale.Pick(_G.GetLocale and _G.GetLocale(), type(W) == "table" and W.idioma or nil))

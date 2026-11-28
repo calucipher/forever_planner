@@ -22,10 +22,12 @@ local function fmt(n) return ns.Util and ns.Util.FormatInt(floor((n or 0) + 0.5)
 -- Mobs (R7, R15)
 ------------------------------------------------------------------------------------------
 -- Máscara de inimigos do faction template: 1 jogadores, 2 Aliança, 4 Horda, 8 monstros.
--- Hostil se ataca jogador ou Horda; 0 (neutro) e template desconhecido contam como atacável.
-function Zones.Hostile(enemyMask)
-    if enemyMask == nil or enemyMask == 0 then return true end
-    return enemyMask % 2 == 1 or floor(enemyMask / 4) % 2 == 1
+-- Hostil se ataca jogador ou a facção do jogador (padrão Horda); 0 (neutro) e template desconhecido
+-- contam como atacável, salvo com aggressive (spec 030, R7b: o perigo conta só quem ataca).
+function Zones.Hostile(enemyMask, faction, aggressive)
+    if enemyMask == nil or enemyMask == 0 then return not aggressive end
+    local bit = faction == "Alliance" and 2 or 4
+    return enemyMask % 2 == 1 or floor(enemyMask / bit) % 2 == 1
 end
 
 function Zones.IsHelperName(name, patterns)
